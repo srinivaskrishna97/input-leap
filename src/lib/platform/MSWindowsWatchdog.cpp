@@ -181,10 +181,13 @@ void MSWindowsWatchdog::main_loop()
     while (m_monitoring) {
         try {
 
-            if (m_processRunning && getCommand().empty()) {
-                LOG_INFO("process started but command is empty, shutting down");
+            if (getCommand().empty() && (m_processRunning || m_commandChanged)) {
+                LOG_INFO("command is empty, shutting down any running processes");
+                // reap all server/client processes by name, not just the one
+                // tracked handle, so nothing is left orphaned after a stop/quit.
                 shutdownExistingProcesses();
                 m_processRunning = false;
+                m_commandChanged = false;
                 continue;
             }
 
@@ -278,6 +281,12 @@ MSWindowsWatchdog::startProcess()
         shutdownProcess(m_processInfo.hProcess, m_processInfo.dwProcessId, 20);
         m_processRunning = false;
     }
+
+    // Reap any orphaned server/client processes before launching a new one.
+    // The watchdog only tracks the most recent process handle, so a process
+    // that lost its IPC connection is never shut down and accumulates across
+    // session changes and respawns.
+    shutdownExistingProcesses();
 
     m_session.updateActiveSession();
 

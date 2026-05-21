@@ -125,6 +125,7 @@ public slots:
         void cmd_app_finished(int exitCode, QProcess::ExitStatus);
         void trayActivated(QSystemTrayIcon::ActivationReason reason);
         void stop_cmd_app();
+        void quit();
         void logOutput();
         void logError();
         void bonjourInstallFinished();

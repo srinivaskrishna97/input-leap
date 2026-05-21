@@ -343,7 +343,17 @@ void MainWindow::initConnections()
     connect(ui_->m_pActionStopCmdApp, &QAction::triggered, this, &MainWindow::stop_cmd_app);
     connect(ui_->m_pActionShowLog, &QAction::triggered, this, &MainWindow::showLogWindow);
     connect(ui_->m_pActionReload, &QAction::triggered, this, &MainWindow::restart_cmd_app);
-    connect(ui_->m_pActionQuit, &QAction::triggered, qApp, &QCoreApplication::quit);
+    connect(ui_->m_pActionQuit, &QAction::triggered, this, &MainWindow::quit);
+}
+
+void MainWindow::quit()
+{
+    // Quitting must fully stop InputLeap so nothing is left running in the
+    // background. In service mode this sends an empty command, telling the
+    // daemon to stop the server and reap all of its child processes; in
+    // desktop mode it terminates the child process directly.
+    stop_cmd_app();
+    qApp->quit();
 }
 
 void MainWindow::saveSettings()

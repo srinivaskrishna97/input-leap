@@ -121,6 +121,13 @@ void IpcClient::sendCommand(const QString& command, ElevateMode const elevate)
     // Refer to enum ElevateMode documentation for why this flag is mapped this way
     elevateBuf[0] = (elevate == ElevateAlways) ? 1 : 0;
     stream.writeRawData(elevateBuf, 1);
+
+    // Flush and block until the bytes are handed to the OS. Commands are sent
+    // on user actions (start/stop), and on quit the application exits
+    // immediately afterwards, so without this the buffered message can be
+    // dropped before the daemon receives it.
+    m_Socket->flush();
+    m_Socket->waitForBytesWritten(1000);
 }
 
 void IpcClient::handleReadLogLine(const QString& text)

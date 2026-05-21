@@ -1,0 +1,1 @@
+Fix Windows bug where quitting from the tray left the daemon running the server and accumulated orphaned input-leaps/input-leapc processes. Quitting now stops the server, the watchdog reaps all child processes by name, and the IPC stop command is flushed before the GUI exits.
