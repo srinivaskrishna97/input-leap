@@ -1,0 +1,1 @@
+Fix rapid enter/leave "bounce" when the mouse crosses onto a client whose entry edge links back to the screen it came from. The server now insets the cursor a few pixels inside a client screen's edge on entry (previously the jump-zone avoidance ran only for the server screen, so client entries landed exactly on the switch-back trigger).

@@ -704,16 +704,20 @@ BaseClientProxy* Server::mapToNeighbor(BaseClientProxy* src, EDirection srcSide,
 void Server::avoidJumpZone(BaseClientProxy* dst, EDirection dir, std::int32_t& x,
                            std::int32_t& y) const
 {
-	// we only need to avoid jump zones on the primary screen
-	if (dst != m_primaryClient) {
-		return;
-	}
-
     const std::string dstName(getName(dst));
 	std::int32_t dx, dy, dw, dh;
 	dst->getShape(dx, dy, dw, dh);
 	float t = mapToFraction(dst, dir, x, y);
 	std::int32_t z = getJumpZoneSize(dst);
+
+	// getJumpZoneSize() returns 0 for client screens, which would leave the
+	// cursor exactly on the destination edge. If that edge links back to the
+	// screen we came from, the cursor switches straight back, producing a
+	// rapid enter/leave "bounce" while crossing. Inset client entries by a
+	// few pixels so the cursor lands just inside the edge, not on the trigger.
+	if (z < 1) {
+		z = 4;
+	}
 
 	// move in far enough to avoid the jump zone.  if entering a side
 	// that doesn't have a neighbor (i.e. an asymmetrical side) then we
