@@ -183,8 +183,13 @@ void MSWindowsWatchdog::main_loop()
 
             if (getCommand().empty() && (m_processRunning || m_commandChanged)) {
                 LOG_INFO("command is empty, shutting down any running processes");
-                // reap all server/client processes by name, not just the one
-                // tracked handle, so nothing is left orphaned after a stop/quit.
+                // shut down the tracked process via its full-access handle
+                // (reliable), then sweep by name for any orphans. Re-opening
+                // the server by PID can fail because it runs with UIAccess, so
+                // the tracked handle is what actually terminates it.
+                if (m_processRunning) {
+                    shutdownProcess(m_processInfo.hProcess, m_processInfo.dwProcessId, 20);
+                }
                 shutdownExistingProcesses();
                 m_processRunning = false;
                 m_commandChanged = false;
@@ -455,7 +460,12 @@ void MSWindowsWatchdog::output_loop()
 void
 MSWindowsWatchdog::shutdownProcess(HANDLE handle, DWORD pid, int timeout)
 {
-    DWORD exitCode;
+    if (handle == nullptr) {
+        return;
+    }
+
+    // default to STILL_ACTIVE so a failed query does not skip the shutdown
+    DWORD exitCode = STILL_ACTIVE;
     GetExitCodeProcess(handle, &exitCode);
     if (exitCode != STILL_ACTIVE) {
         return;
@@ -523,8 +533,16 @@ MSWindowsWatchdog::shutdownExistingProcesses()
             if (_stricmp(entry.szExeFile, "InputLeapc.exe") == 0 ||
                 _stricmp(entry.szExeFile, "InputLeaps.exe") == 0) {
 
-                HANDLE handle = OpenProcess(PROCESS_ALL_ACCESS, FALSE, entry.th32ProcessID);
-                shutdownProcess(handle, entry.th32ProcessID, 10);
+                // request only the rights we need; PROCESS_ALL_ACCESS is
+                // denied for processes launched with UIAccess, which left
+                // orphaned servers/clients impossible to terminate here.
+                HANDLE handle = OpenProcess(
+                    PROCESS_TERMINATE | PROCESS_QUERY_LIMITED_INFORMATION,
+                    FALSE, entry.th32ProcessID);
+                if (handle != nullptr) {
+                    shutdownProcess(handle, entry.th32ProcessID, 10);
+                    CloseHandle(handle);
+                }
             }
         }
 
