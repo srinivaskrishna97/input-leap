@@ -65,6 +65,9 @@ namespace inputleap {
 #define VK_XBUTTON1            0x05
 #define VK_XBUTTON2            0x06
 #endif
+#if !defined(MOUSEEVENTF_VIRTUALDESK)
+#define MOUSEEVENTF_VIRTUALDESK 0x4000
+#endif
 
 // <unused>; <unused>
 #define INPUTLEAP_MSG_SWITCH INPUTLEAP_HOOK_LAST_MSG + 1
@@ -454,14 +457,19 @@ MSWindowsDesks::secondaryDeskProc(
 
 void MSWindowsDesks::deskMouseMove(std::int32_t x, std::int32_t y) const
 {
-    // when using absolute positioning with mouse_event(),
-    // the normalized device coordinates range over only
-    // the primary screen.
-    std::int32_t w = GetSystemMetrics(SM_CXSCREEN);
-    std::int32_t h = GetSystemMetrics(SM_CYSCREEN);
-    mouse_event(MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE,
-                            (DWORD)((65535.0f * x) / (w - 1) + 0.5f),
-                            (DWORD)((65535.0f * y) / (h - 1) + 0.5f),
+    // Normalize over the whole virtual desktop (all monitors), not just the
+    // primary screen. Without MOUSEEVENTF_VIRTUALDESK the normalized
+    // coordinates map onto the primary monitor only, so positions on other
+    // monitors -- including the negative coordinates of a monitor left of or
+    // above the primary -- cannot be expressed and the cursor lands in the
+    // wrong place (e.g. centered on the wrong monitor).
+    const std::int32_t x0 = GetSystemMetrics(SM_XVIRTUALSCREEN);
+    const std::int32_t y0 = GetSystemMetrics(SM_YVIRTUALSCREEN);
+    const std::int32_t w  = GetSystemMetrics(SM_CXVIRTUALSCREEN);
+    const std::int32_t h  = GetSystemMetrics(SM_CYVIRTUALSCREEN);
+    mouse_event(MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK,
+                            (DWORD)((65535.0f * (x - x0)) / (w - 1) + 0.5f),
+                            (DWORD)((65535.0f * (y - y0)) / (h - 1) + 0.5f),
                             0, 0);
 }
 
