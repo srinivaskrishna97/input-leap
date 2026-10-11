@@ -19,6 +19,7 @@
 #include "base/Fwd.h"
 #include "inputleap/Fwd.h"
 #include "inputleap/clipboard_types.h"
+#include "inputleap/ClipboardData.h"
 #include "inputleap/key_types.h"
 #include "inputleap/mouse_types.h"
 #include "inputleap/option_types.h"
@@ -61,6 +62,12 @@ public:
     virtual void send_clipboard_chunk_1_6(const ClipboardChunk& chunk) = 0;
     virtual void send_file_chunk_1_6(const FileChunk& chunk) = 0;
     virtual void send_grab_clipboard(ClipboardID id) = 0;
+
+    // only used once kClipboardCapOffers has been negotiated
+    virtual void send_clipboard_data_chunk(const ClipboardChunk& chunk) = 0;
+    virtual void send_clipboard_offer(ClipboardID id, std::uint32_t flags,
+                                      const ClipboardOffer& offer) = 0;
+    virtual void send_clipboard_data_request(ClipboardID id, std::uint64_t hash) = 0;
 
     virtual void flush() = 0;
     virtual void close() = 0;

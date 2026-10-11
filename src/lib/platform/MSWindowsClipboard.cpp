@@ -193,6 +193,36 @@ std::string MSWindowsClipboard::get(EFormat format) const
     return converter->toIClipboard(win32Data);
 }
 
+UINT MSWindowsClipboard::getWin32Format(EFormat format) const
+{
+    for (auto* converter : m_converters) {
+        if (converter->getFormat() == format) {
+            return converter->getWin32Format();
+        }
+    }
+    return 0;
+}
+
+bool MSWindowsClipboard::getFormatForWin32(UINT win32Format, EFormat& format) const
+{
+    for (auto* converter : m_converters) {
+        if (converter->getWin32Format() == win32Format) {
+            format = converter->getFormat();
+            return true;
+        }
+    }
+    return false;
+}
+
+void MSWindowsClipboard::addDelayed(EFormat format)
+{
+    UINT win32Format = getWin32Format(format);
+    if (win32Format != 0) {
+        LOG_DEBUG("announce clipboard format: %d", format);
+        SetClipboardData(win32Format, nullptr);
+    }
+}
+
 void
 MSWindowsClipboard::clearConverters()
 {

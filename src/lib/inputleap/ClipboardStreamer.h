@@ -48,8 +48,11 @@ clipboard. The receiver discards partial data when it sees the start of the new 
 */
 class ClipboardStreamer : public EventTarget {
 public:
-    /// Writes a clipboard chunk message to the connection.
-    using ChunkWriter = std::function<void(const ClipboardChunk&)>;
+    /*! Writes a clipboard chunk message to the connection. \p encoded is true for chunks of
+        transfers queued with send_encoded(), which use kMsgDClipboardData instead of
+        kMsgDClipboard.
+    */
+    using ChunkWriter = std::function<void(const ClipboardChunk& chunk, bool encoded)>;
 
     static constexpr std::size_t kChunkSize = 32 * 1024;
     static constexpr std::size_t kDefaultWindowSize = 2 * kChunkSize;
@@ -78,6 +81,9 @@ public:
 
     /// Drops all pending transfers. A partially sent transfer is left incomplete.
     void cancel();
+
+    /// Drops pending transfers of clipboard \p id, e.g. because its contents have changed.
+    void cancel(ClipboardID id);
 
     /// Returns true if nothing is being sent.
     bool is_idle() const { return transfers_.empty(); }

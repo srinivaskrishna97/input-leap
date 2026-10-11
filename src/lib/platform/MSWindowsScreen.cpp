@@ -164,6 +164,8 @@ MSWindowsScreen::MSWindowsScreen(
                           [this](const auto& e){ handle_system_event(e); });
     m_events->add_handler(EventType::CLIPBOARD_CAPTURED, m_clipboardWorker->event_target(),
                           [this](const auto& e){ handle_clipboard_captured(); });
+    m_events->add_handler(EventType::CLIPBOARD_DATA_REQUESTED, m_clipboardWorker->event_target(),
+                          [this](const auto& e){ handle_clipboard_data_needed(e); });
 
     // install the platform event queue
     m_events->set_buffer(std::make_unique<MSWindowsEventQueueBuffer>(m_events));
@@ -177,6 +179,8 @@ MSWindowsScreen::~MSWindowsScreen()
 
     // stop the clipboard worker before the event queue buffer goes away
     m_events->remove_handler(EventType::CLIPBOARD_CAPTURED, m_clipboardWorker->event_target());
+    m_events->remove_handler(EventType::CLIPBOARD_DATA_REQUESTED,
+                             m_clipboardWorker->event_target());
     m_clipboardWorker.reset();
 
     m_events->set_buffer(nullptr);
@@ -269,6 +273,9 @@ MSWindowsScreen::disable()
     // stop snooping the clipboard
     ChangeClipboardChain(m_window, m_nextClipboardWindow);
     m_nextClipboardWindow = nullptr;
+
+    // contents offered by other screens cannot be obtained anymore
+    m_clipboardWorker->offers_unavailable();
 
     // uninstall fix timer
     if (m_fixTimer != nullptr) {
@@ -430,10 +437,39 @@ MSWindowsScreen::setClipboard(ClipboardID, const IClipboard* src)
 bool MSWindowsScreen::setClipboardData(ClipboardID id, const MarshalledClipboardPtr& data)
 {
     if (m_clipboardWorker->is_running()) {
-        m_clipboardWorker->apply(data);
+        // either the data of offered contents, which completes a paste, or new contents
+        if (!m_clipboardWorker->deliver(data)) {
+            m_clipboardWorker->apply(data);
+        }
         return true;
     }
     return PlatformScreen::setClipboardData(id, data);
+}
+
+bool MSWindowsScreen::supportsClipboardOffers() const
+{
+    return m_clipboardWorker->is_running();
+}
+
+void MSWindowsScreen::setClipboardOffer(ClipboardID, const ClipboardOffer& offer)
+{
+    m_clipboardWorker->offer(offer);
+}
+
+void MSWindowsScreen::clipboardDataUnavailable(ClipboardID, const ClipboardOffer& offer)
+{
+    m_clipboardWorker->offer_unavailable(offer);
+}
+
+void MSWindowsScreen::handle_clipboard_data_needed(const Event& event)
+{
+    // Windows has a single clipboard, so the contents are requested as the clipboard; they
+    // are identified by their hash anyway
+    ClipboardOfferInfo info;
+    info.id = kClipboardClipboard;
+    info.sequence = m_sequenceNumber;
+    info.offer = event.get_data_as<ClipboardOffer>();
+    sendEvent(EventType::CLIPBOARD_DATA_REQUESTED, create_event_data<ClipboardOfferInfo>(info));
 }
 
 bool MSWindowsScreen::hasClipboardSnapshots() const

@@ -24,6 +24,8 @@
 #include "inputleap/IClient.h"
 #include "inputleap/Clipboard.h"
 #include "inputleap/ClipboardData.h"
+
+#include <optional>
 #include "inputleap/DragInformation.h"
 #include "inputleap/INode.h"
 #include "inputleap/ClientArgs.h"
@@ -145,6 +147,21 @@ public:
     //! Set the clipboard from marshalled data received from the server
     void setClipboardData(ClipboardID, const MarshalledClipboardPtr& data);
 
+    //! Clipboard contents offered by the server
+    /*!
+    \p flags contains kClipboardOfferDataFollows if the server sends the data right away.
+    */
+    void setClipboardOffer(ClipboardID, const ClipboardOffer& offer, std::uint32_t flags);
+
+    //! Clipboard contents that were offered by the server
+    void setOfferedClipboardData(ClipboardID, const MarshalledClipboardPtr& data);
+
+    //! The server cannot provide requested clipboard contents
+    void clipboardDataUnavailable(ClipboardID, const ClipboardOffer& offer);
+
+    //! The server requests clipboard contents that this screen has offered
+    void clipboardDataRequested(ClipboardID, const ClipboardOffer& offer);
+
     void grabClipboard(ClipboardID) override;
     void setClipboardDirty(ClipboardID, bool) override;
     void keyDown(KeyID, KeyModifierMask, KeyButton) override;
@@ -162,6 +179,7 @@ public:
 
 private:
     void sendClipboard(ClipboardID);
+    void sendClipboardContents(ClipboardID, const MarshalledClipboardPtr& data);
     void send_event(EventType);
     void sendConnectionFailedEvent(const char* msg);
     void send_file_chunk(const FileChunk& data);
@@ -184,6 +202,7 @@ private:
     void handle_shape_changed();
     void handle_clipboard_grabbed(const Event& event);
     void handle_clipboard_changed(const Event& event);
+    void handle_clipboard_data_requested(const Event& event);
     void handle_hello();
     void handle_suspend();
     void handle_resume();
@@ -212,6 +231,12 @@ private:
     bool m_sentClipboard[kClipboardEnd];
     IClipboard::Time m_timeClipboard[kClipboardEnd];
     MarshalledClipboardPtr m_dataClipboard[kClipboardEnd];
+
+    // the latest contents offered by the server for each clipboard
+    std::optional<ClipboardOffer> m_offeredClipboard[kClipboardEnd];
+
+    // the hash of the last contents whose data was sent to the server
+    std::optional<std::uint64_t> m_pushedClipboardHash;
     IEventQueue* m_events;
     std::size_t m_expectedFileSize;
     std::string m_receivedFileData;

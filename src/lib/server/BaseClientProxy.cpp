@@ -60,6 +60,12 @@ MarshalledClipboardPtr BaseClientProxy::getClipboardData(ClipboardID id) const
     return marshall_clipboard(clipboard);
 }
 
+void BaseClientProxy::provideClipboardData(ClipboardID id, const MarshalledClipboardPtr& data)
+{
+    setClipboardDirty(id, true);
+    setClipboardData(id, data);
+}
+
 void BaseClientProxy::setClipboardData(ClipboardID id, const MarshalledClipboardPtr& data)
 {
     const auto& contents = data ? data : empty_marshalled_clipboard();

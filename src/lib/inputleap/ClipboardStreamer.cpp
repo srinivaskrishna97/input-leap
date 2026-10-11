@@ -47,7 +47,7 @@ ClipboardStreamer::ClipboardStreamer(IEventQueue* events, const EventTarget* str
     events_{events},
     stream_target_{stream_target},
     writer_{std::move(writer)},
-    window_size_{std::max<std::size_t>(window_size, 1)}
+    window_size_{(std::max)(window_size, std::size_t{1})}
 {
     events_->add_handler(EventType::STREAM_OUTPUT_FLUSHED, stream_target_,
                          [this](const auto&) { on_output_flushed(); });
@@ -97,6 +97,17 @@ void ClipboardStreamer::cancel()
     fallback_interval_ = 0;
 }
 
+void ClipboardStreamer::cancel(ClipboardID id)
+{
+    transfers_.erase(std::remove_if(transfers_.begin(), transfers_.end(),
+                                    [id](const Transfer& t) { return t.id == id; }),
+                     transfers_.end());
+    if (transfers_.empty()) {
+        cancel_fallback_timer();
+        fallback_interval_ = 0;
+    }
+}
+
 std::size_t ClipboardStreamer::pending_bytes() const
 {
     std::size_t result = 0;
@@ -142,6 +153,7 @@ void ClipboardStreamer::pump()
     while (!transfers_.empty()) {
         Transfer& transfer = transfers_.front();
         const std::string& bytes = transfer.bytes();
+        const bool encoded = transfer.encoded != nullptr;
 
         if (!transfer.started) {
             ClipboardChunk chunk;
@@ -149,7 +161,7 @@ void ClipboardStreamer::pump()
             chunk.sequence_ = transfer.sequence;
             chunk.mark_ = kDataStart;
             chunk.data_ = transfer.start_payload;
-            writer_(chunk);
+            writer_(chunk, encoded);
             transfer.started = true;
         }
 
@@ -157,21 +169,21 @@ void ClipboardStreamer::pump()
             if (budget == 0) {
                 break;
             }
-            std::size_t size = std::min(kChunkSize, bytes.size() - transfer.offset);
+            std::size_t size = (std::min)(kChunkSize, bytes.size() - transfer.offset);
 
             ClipboardChunk chunk;
             chunk.id_ = transfer.id;
             chunk.sequence_ = transfer.sequence;
             chunk.mark_ = kDataChunk;
             chunk.data_.assign(bytes, transfer.offset, size);
-            writer_(chunk);
+            writer_(chunk, encoded);
 
             transfer.offset += size;
-            budget -= std::min(budget, size);
+            budget -= (std::min)(budget, size);
             continue;
         }
 
-        writer_(ClipboardChunk::end(transfer.id, transfer.sequence));
+        writer_(ClipboardChunk::end(transfer.id, transfer.sequence), encoded);
         LOG_DEBUG("sent clipboard %d, size=%zu", transfer.id, bytes.size());
         transfers_.pop_front();
     }
@@ -188,7 +200,7 @@ void ClipboardStreamer::arm_fallback_timer()
     if (fallback_interval_ <= 0) {
         fallback_interval_ = kStreamerMinFallbackInterval;
     } else {
-        fallback_interval_ = std::min(fallback_interval_ * 2, kStreamerMaxFallbackInterval);
+        fallback_interval_ = (std::min)(fallback_interval_ * 2, kStreamerMaxFallbackInterval);
     }
     fallback_timer_ = events_->newOneShotTimer(fallback_interval_, this);
 }

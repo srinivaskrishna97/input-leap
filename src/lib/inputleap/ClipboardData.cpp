@@ -16,6 +16,7 @@
 
 #include "inputleap/ClipboardData.h"
 #include "inputleap/Clipboard.h"
+#include "inputleap/ClipboardCodec.h"
 
 namespace inputleap {
 
@@ -31,6 +32,14 @@ inline std::uint64_t load_le64(const unsigned char* p)
            (static_cast<std::uint64_t>(p[5]) << 40) |
            (static_cast<std::uint64_t>(p[6]) << 48) |
            (static_cast<std::uint64_t>(p[7]) << 56);
+}
+
+inline std::uint32_t load_be32(const unsigned char* p)
+{
+    return (static_cast<std::uint32_t>(p[0]) << 24) |
+           (static_cast<std::uint32_t>(p[1]) << 16) |
+           (static_cast<std::uint32_t>(p[2]) << 8) |
+            static_cast<std::uint32_t>(p[3]);
 }
 
 inline std::uint64_t mix64(std::uint64_t x)
@@ -57,9 +66,26 @@ MarshalledClipboard::MarshalledClipboard(std::string data) :
 {
 }
 
+MarshalledClipboard::MarshalledClipboard(std::string data,
+                                         std::shared_ptr<const std::string> rle32) :
+    MarshalledClipboard(std::move(data))
+{
+    if (rle32) {
+        std::call_once(rle32_once_, [this, &rle32]() { rle32_ = std::move(rle32); });
+    }
+}
+
 bool MarshalledClipboard::same_contents(const MarshalledClipboard& other) const
 {
     return this == &other || (hash_ == other.hash_ && data_ == other.data_);
+}
+
+std::shared_ptr<const std::string> MarshalledClipboard::rle32() const
+{
+    std::call_once(rle32_once_, [this]() {
+        rle32_ = std::make_shared<const std::string>(rle32_encode(data_));
+    });
+    return rle32_;
 }
 
 std::uint64_t MarshalledClipboard::compute_hash(const char* data, std::size_t size)
@@ -110,6 +136,47 @@ bool same_clipboard_contents(const MarshalledClipboardPtr& a, const MarshalledCl
         return false;
     }
     return a->same_contents(*b);
+}
+
+std::uint32_t marshalled_clipboard_formats(const std::string& data)
+{
+    using namespace clipboard_data_detail;
+
+    // see IClipboard::marshall() for the format
+    const auto* p = reinterpret_cast<const unsigned char*>(data.data());
+    const std::size_t size = data.size();
+    if (size < 4) {
+        return 0;
+    }
+
+    std::uint32_t count = load_be32(p);
+    std::size_t pos = 4;
+    std::uint32_t formats = 0;
+    for (std::uint32_t i = 0; i < count; ++i) {
+        if (size - pos < 8) {
+            return 0;
+        }
+        std::uint32_t format = load_be32(p + pos);
+        std::uint32_t format_size = load_be32(p + pos + 4);
+        pos += 8;
+        if (size - pos < format_size) {
+            return 0;
+        }
+        pos += format_size;
+        if (format < IClipboard::kNumFormats) {
+            formats |= 1u << format;
+        }
+    }
+    return formats;
+}
+
+ClipboardOffer ClipboardOffer::describe(const MarshalledClipboard& data)
+{
+    ClipboardOffer offer;
+    offer.formats = marshalled_clipboard_formats(data.data());
+    offer.size = static_cast<std::uint32_t>(data.size());
+    offer.hash = data.hash();
+    return offer;
 }
 
 } // namespace inputleap

@@ -22,6 +22,8 @@
 #include "inputleap/clipboard_types.h"
 #include "inputleap/Clipboard.h"
 #include "inputleap/ClipboardData.h"
+
+#include <vector>
 #include "inputleap/key_types.h"
 #include "inputleap/mouse_types.h"
 #include "inputleap/Fwd.h"
@@ -297,6 +299,9 @@ private:
     void handle_shape_changed(BaseClientProxy* client);
     void handle_clipboard_grabbed(const Event& event, BaseClientProxy* client);
     void handle_clipboard_changed(const Event& event, BaseClientProxy* client);
+    void handle_clipboard_offered(const Event& event, BaseClientProxy* client);
+    void handle_clipboard_data_requested(const Event& event, BaseClientProxy* client);
+    void handle_clipboard_data_unavailable(const Event& event, BaseClientProxy* client);
     void handle_key_down_event(const Event& event);
     void handle_key_up_event(const Event& event);
     void handle_key_repeat_event(const Event& event);
@@ -322,6 +327,22 @@ private:
 
     // event processing
     void onClipboardChanged(BaseClientProxy* sender, ClipboardID id, std::uint32_t seqNum);
+    void onClipboardOffered(BaseClientProxy* sender, const ClipboardOfferInfo& info);
+    void onClipboardDataRequested(BaseClientProxy* requester, ClipboardID id,
+                                  const ClipboardOffer& offer);
+
+    // sends the current contents of a clipboard, or an offer of them, to a screen
+    void sendClipboard(BaseClientProxy* screen, ClipboardID id);
+
+    // asks the owner of a clipboard for contents that it has only offered
+    void fetchClipboard(ClipboardID id);
+
+    // answers the screens waiting for the contents of a clipboard
+    void serveClipboardRequests(ClipboardID id);
+    void failClipboardRequests(ClipboardID id);
+
+    // finds known clipboard contents by their hash
+    MarshalledClipboardPtr findClipboardData(std::uint64_t hash) const;
     void onScreensaver(bool activated);
     void onKeyDown(KeyID, KeyModifierMask, KeyButton,
                             const char* screens);
@@ -380,10 +401,16 @@ private:
         ClipboardInfo();
 
     public:
-        // the contents in the marshalled form, never null
+        // the contents in the marshalled form, or null if the owner has only offered them
         MarshalledClipboardPtr m_clipboardData;
+        // describes the contents, whether they are known or not
+        ClipboardOffer m_clipboardOffer;
         std::string m_clipboardOwner;
         std::uint32_t m_clipboardSeqNum;
+        // whether the contents have been requested from the owner
+        bool m_requestedFromOwner;
+        // screens waiting for the contents, e.g. because the user pastes them
+        std::vector<BaseClientProxy*> m_waiting;
     };
 
     // the primary screen client

@@ -276,6 +276,21 @@ enum class EventType : std::uint32_t {
     */
     CLIPBOARD_CAPTURED,
 
+    /** Sent when a screen announces the contents of a clipboard that it owns without sending
+        them. The data is a ClipboardOfferInfo.
+    */
+    CLIPBOARD_OFFERED,
+
+    /** Sent when a screen needs offered clipboard contents, e.g. because an application
+        pastes them. The data is a ClipboardOfferInfo that identifies the contents.
+    */
+    CLIPBOARD_DATA_REQUESTED,
+
+    /** Sent when a screen cannot provide requested clipboard contents. The data is a
+        ClipboardOfferInfo that identifies the contents.
+    */
+    CLIPBOARD_DATA_UNAVAILABLE,
+
     /// This event is sent whenever a file chunk is transferred.
     FILE_CHUNK_SENDING,
 

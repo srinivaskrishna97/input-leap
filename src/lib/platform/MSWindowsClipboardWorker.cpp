@@ -21,6 +21,7 @@
 #include "base/IEventQueue.h"
 #include "base/Log.h"
 
+#include <chrono>
 #include <future>
 
 namespace inputleap {
@@ -46,6 +47,9 @@ const UINT kClipboardCaptureDelayMs = 100;
 const UINT kClipboardRetryDelayMs = 50;
 const int kClipboardMaxCaptureRetries = 40;
 const int kClipboardMaxApplyRetries = 40;
+
+// How long a pasting application waits for offered contents to arrive from another screen.
+const int kClipboardRenderTimeoutSeconds = 30;
 
 std::once_flag g_clipboard_worker_class_once;
 ATOM g_clipboard_worker_class = 0;
@@ -153,6 +157,21 @@ LRESULT MSWindowsClipboardWorker::handle_message(UINT msg, WPARAM wparam, LPARAM
         }
         return 0;
 
+    case WM_RENDERFORMAT:
+        // an application requests the data of offered contents
+        render_format(static_cast<UINT>(wparam));
+        return 0;
+
+    case WM_RENDERALLFORMATS:
+        // the window is being destroyed while the clipboard holds offered contents
+        render_all_formats();
+        return 0;
+
+    case WM_DESTROYCLIPBOARD:
+        // the clipboard was emptied, so offered contents are gone
+        reset_offer();
+        return 0;
+
     case WM_CLOSE:
         KillTimer(window_, kClipboardWorkerCaptureTimer);
         KillTimer(window_, kClipboardWorkerRetryTimer);
@@ -174,6 +193,15 @@ void MSWindowsClipboardWorker::post(UINT msg)
     if (window_ != nullptr) {
         PostMessageW(window_, msg, 0, 0);
     }
+}
+
+void MSWindowsClipboardWorker::enqueue(Command command)
+{
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        commands_.push_back(std::move(command));
+    }
+    post(kClipboardWorkerMsgCommands);
 }
 
 void MSWindowsClipboardWorker::request_capture()
@@ -213,25 +241,67 @@ MarshalledClipboardPtr MSWindowsClipboardWorker::current_snapshot() const
 
 void MSWindowsClipboardWorker::apply(MarshalledClipboardPtr data)
 {
-    {
-        std::lock_guard<std::mutex> lock(mutex_);
-        Command command;
-        command.kind = Command::Kind::Apply;
-        command.data = std::move(data);
-        commands_.push_back(std::move(command));
-    }
-    post(kClipboardWorkerMsgCommands);
+    Command command;
+    command.kind = Command::Kind::Apply;
+    command.data = std::move(data);
+    enqueue(std::move(command));
 }
 
 void MSWindowsClipboardWorker::clear()
 {
+    Command command;
+    command.kind = Command::Kind::Clear;
+    enqueue(std::move(command));
+}
+
+void MSWindowsClipboardWorker::offer(const ClipboardOffer& offer)
+{
     {
         std::lock_guard<std::mutex> lock(mutex_);
-        Command command;
-        command.kind = Command::Kind::Clear;
-        commands_.push_back(std::move(command));
+        if (offer_.active && offer_.offer != offer) {
+            // a paste waiting for the previous contents won't get them anymore
+            offer_.unavailable = true;
+            offer_cv_.notify_all();
+        }
     }
-    post(kClipboardWorkerMsgCommands);
+
+    Command command;
+    command.kind = Command::Kind::Offer;
+    command.offer = offer;
+    enqueue(std::move(command));
+}
+
+bool MSWindowsClipboardWorker::deliver(const MarshalledClipboardPtr& data)
+{
+    if (!data) {
+        return false;
+    }
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (!offer_.active || !offer_.offer.describes(*data)) {
+        return false;
+    }
+    offer_.data = data;
+    offer_cv_.notify_all();
+    LOG_DEBUG("received offered clipboard data, size=%zu", data->size());
+    return true;
+}
+
+void MSWindowsClipboardWorker::offer_unavailable(const ClipboardOffer& offer)
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (offer_.active && offer_.offer.hash == offer.hash) {
+        offer_.unavailable = true;
+        offer_cv_.notify_all();
+    }
+}
+
+void MSWindowsClipboardWorker::offers_unavailable()
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (offer_.active && !offer_.data) {
+        offer_.unavailable = true;
+        offer_cv_.notify_all();
+    }
 }
 
 void MSWindowsClipboardWorker::process_commands()
@@ -254,7 +324,19 @@ void MSWindowsClipboardWorker::process_commands()
             }
         }
 
-        bool ok = command.kind == Command::Kind::Apply ? apply_now(command.data) : clear_now();
+        bool ok = false;
+        switch (command.kind) {
+        case Command::Kind::Apply:
+            ok = apply_now(command.data);
+            break;
+        case Command::Kind::Clear:
+            ok = clear_now();
+            break;
+        case Command::Kind::Offer:
+            ok = offer_now(command.offer);
+            break;
+        }
+
         if (!ok) {
             if (apply_retries_ < kClipboardMaxApplyRetries) {
                 // another application holds the clipboard open, try again shortly
@@ -287,6 +369,7 @@ bool MSWindowsClipboardWorker::apply_now(const MarshalledClipboardPtr& data)
     Clipboard source;
     source.unmarshall(contents->data(), 0);
 
+    // replaces offered contents, if any (Windows sends WM_DESTROYCLIPBOARD)
     MSWindowsClipboard destination(window_);
     if (!Clipboard::copy(&destination, &source)) {
         return false;
@@ -308,6 +391,152 @@ bool MSWindowsClipboardWorker::clear_now()
     clipboard.close();
     last_applied_.reset();
     return true;
+}
+
+bool MSWindowsClipboardWorker::offer_now(const ClipboardOffer& offer)
+{
+    {
+        // the same contents are often offered for both InputLeap clipboards
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (offer_.active && offer_.offer == offer && GetClipboardOwner() == window_) {
+            return true;
+        }
+    }
+
+    MSWindowsClipboard clipboard(window_);
+    if (!clipboard.open(0)) {
+        return false;
+    }
+    if (!clipboard.clear()) {
+        clipboard.close();
+        return false;
+    }
+    for (int format = 0; format < IClipboard::kNumFormats; ++format) {
+        if ((offer.formats & (1u << format)) != 0) {
+            clipboard.addDelayed(static_cast<IClipboard::EFormat>(format));
+        }
+    }
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        offer_ = OfferState{};
+        offer_.active = true;
+        offer_.offer = offer;
+    }
+    clipboard.close();
+
+    last_applied_.reset();
+    LOG_DEBUG("offered clipboard contents, size=%u", offer.size);
+    return true;
+}
+
+void MSWindowsClipboardWorker::reset_offer()
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (offer_.active) {
+        offer_ = OfferState{};
+        offer_cv_.notify_all();
+    }
+}
+
+MarshalledClipboardPtr MSWindowsClipboardWorker::wait_for_offer_data()
+{
+    std::unique_lock<std::mutex> lock(mutex_);
+    if (!offer_.active || offer_.unavailable) {
+        return nullptr;
+    }
+    if (offer_.data) {
+        return offer_.data;
+    }
+
+    const ClipboardOffer offer = offer_.offer;
+    if (!offer_.requested) {
+        offer_.requested = true;
+        lock.unlock();
+        LOG_DEBUG("requesting offered clipboard data, size=%u", offer.size);
+        events_->add_event(EventType::CLIPBOARD_DATA_REQUESTED, &target_,
+                           create_event_data<ClipboardOffer>(offer));
+        lock.lock();
+    }
+
+    bool done = offer_cv_.wait_for(lock, std::chrono::seconds(kClipboardRenderTimeoutSeconds),
+                                   [this, &offer]() {
+        return !offer_.active || offer_.offer != offer || offer_.data || offer_.unavailable;
+    });
+
+    if (offer_.active && offer_.offer == offer) {
+        if (offer_.data) {
+            return offer_.data;
+        }
+        // allow a later paste to request the data again
+        offer_.requested = false;
+        offer_.unavailable = false;
+    }
+    if (!done) {
+        LOG_WARN("timed out waiting for clipboard data from another screen");
+    }
+    return nullptr;
+}
+
+void MSWindowsClipboardWorker::render_format(UINT win32_format)
+{
+    MSWindowsClipboard clipboard(window_);
+    IClipboard::EFormat format;
+    if (!clipboard.getFormatForWin32(win32_format, format)) {
+        return;
+    }
+
+    MarshalledClipboardPtr data = wait_for_offer_data();
+    if (!data) {
+        LOG_WARN("clipboard data from another screen is not available");
+        return;
+    }
+
+    Clipboard contents;
+    contents.unmarshall(data->data(), 0);
+    if (contents.open(0)) {
+        if (contents.has(format)) {
+            // the clipboard is already open for the requesting application, so the data is
+            // added without opening it
+            clipboard.add(format, contents.get(format));
+        }
+        contents.close();
+    }
+}
+
+void MSWindowsClipboardWorker::render_all_formats()
+{
+    MarshalledClipboardPtr data;
+    std::uint32_t formats = 0;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (offer_.active) {
+            data = offer_.data;
+            formats = offer_.offer.formats;
+        }
+    }
+    // the data cannot be requested from the other screen anymore at this point
+    if (!data) {
+        return;
+    }
+
+    if (!OpenClipboard(window_)) {
+        return;
+    }
+    if (GetClipboardOwner() == window_) {
+        Clipboard contents;
+        contents.unmarshall(data->data(), 0);
+        MSWindowsClipboard clipboard(window_);
+        if (contents.open(0)) {
+            for (int format = 0; format < IClipboard::kNumFormats; ++format) {
+                auto eformat = static_cast<IClipboard::EFormat>(format);
+                if ((formats & (1u << format)) != 0 && contents.has(eformat)) {
+                    clipboard.add(eformat, contents.get(eformat));
+                }
+            }
+            contents.close();
+        }
+    }
+    CloseClipboard();
 }
 
 void MSWindowsClipboardWorker::schedule_capture(UINT delay_ms)
@@ -354,6 +583,11 @@ void MSWindowsClipboardWorker::capture_now()
         // the clipboard changed while it was being read
         schedule_capture(kClipboardCaptureDelayMs);
         return;
+    }
+
+    // prepare the compressed form now, so that sending it later does not have to
+    if (data->size() >= kClipboardEagerSize) {
+        data->rle32();
     }
 
     capture_retries_ = 0;

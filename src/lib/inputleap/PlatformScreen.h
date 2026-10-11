@@ -73,6 +73,9 @@ public:
     bool setClipboardData(ClipboardID id, const MarshalledClipboardPtr& data) override;
     bool hasClipboardSnapshots() const override { return false; }
     MarshalledClipboardPtr getClipboardSnapshot(ClipboardID) const override { return nullptr; }
+    bool supportsClipboardOffers() const override { return false; }
+    void setClipboardOffer(ClipboardID, const ClipboardOffer&) override { }
+    void clipboardDataUnavailable(ClipboardID, const ClipboardOffer&) override { }
 
 protected:
     //! Update mouse buttons

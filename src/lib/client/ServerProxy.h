@@ -20,12 +20,14 @@
 
 #include "inputleap/clipboard_types.h"
 #include "inputleap/ClipboardData.h"
+#include "inputleap/ClipboardTransfer.h"
 #include "inputleap/key_types.h"
 #include "inputleap/Fwd.h"
 #include "base/Fwd.h"
 #include "base/Event.h"
 #include "base/EventTarget.h"
 
+#include <limits>
 #include <memory>
 #include <string>
 
@@ -62,6 +64,30 @@ public:
     The data is sent in the background without delaying input messages.
     */
     void onClipboardChanged(ClipboardID, const MarshalledClipboardPtr& data);
+
+    //! Offer clipboard contents to the server without sending them
+    /*!
+    Only valid if the server supports kClipboardCapOffers. \p flags may contain
+    kClipboardOfferDataFollows if the data is sent right after with onClipboardChanged().
+    */
+    void onClipboardOffered(ClipboardID, const ClipboardOffer& offer, std::uint32_t flags);
+
+    //! Ask the server for offered clipboard contents
+    void requestClipboardData(ClipboardID, const ClipboardOffer& offer);
+
+    //! Send clipboard contents that the server has requested
+    void provideClipboardData(ClipboardID, const MarshalledClipboardPtr& data);
+
+    //! Tell the server that requested clipboard contents are not available
+    void provideClipboardUnavailable(ClipboardID, const ClipboardOffer& offer);
+
+    //@}
+
+    //! @name accessors
+    //@{
+
+    //! The optional clipboard features negotiated with the server (kClipboardCap*)
+    std::uint32_t clipboardCapabilities() const { return m_clipboardCaps; }
 
     //@}
 
@@ -117,6 +143,11 @@ private:
     void infoAcknowledgment();
     void fileChunkReceived();
     void dragInfoReceived();
+    void clipboardOffer();
+    void clipboardDataRequest();
+    void clipboardData();
+
+    void sendClipboardTransfer(ClipboardID, const ClipboardTransferPayload& payload);
 
 private:
     typedef EResult (ServerProxy::*MessageParser)(const std::uint8_t*);
@@ -147,6 +178,12 @@ private:
     // clipboard data being received from the server
     std::string m_clipboardRecvData;
     std::size_t m_clipboardRecvExpectedSize = 0;
+
+    // optional clipboard protocol features negotiated with the server (kClipboardCap*)
+    std::uint32_t m_clipboardCaps = 0;
+
+    // clipboard data being received from the server with kMsgDClipboardData
+    ClipboardTransferReceiver m_clipboardReceiver{(std::numeric_limits<std::size_t>::max)()};
 };
 
 } // namespace inputleap

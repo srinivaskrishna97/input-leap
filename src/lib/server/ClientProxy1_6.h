@@ -22,9 +22,12 @@
 #include "base/Fwd.h"
 #include "inputleap/Clipboard.h"
 #include "inputleap/ClipboardData.h"
+#include "inputleap/ClipboardTransfer.h"
 #include "inputleap/protocol_types.h"
 
+#include <limits>
 #include <memory>
+#include <optional>
 
 namespace inputleap {
 
@@ -73,6 +76,11 @@ public:
     // BaseClientProxy overrides
     MarshalledClipboardPtr getClipboardData(ClipboardID id) const override;
     void setClipboardData(ClipboardID id, const MarshalledClipboardPtr& data) override;
+    bool supportsClipboardOffers() const override;
+    void setClipboardOffer(ClipboardID id, const ClipboardOffer& offer) override;
+    void requestClipboardData(ClipboardID id, const ClipboardOffer& offer) override;
+    void provideClipboardData(ClipboardID id, const MarshalledClipboardPtr& data) override;
+    void provideClipboardUnavailable(ClipboardID id, const ClipboardOffer& offer) override;
 
 protected:
     virtual bool parseHandshakeMessage(const std::uint8_t* code);
@@ -100,6 +108,15 @@ private:
 
     bool recvInfo();
     bool recvGrabClipboard();
+    bool recvClipboardCapabilities();
+    bool recvClipboardOffer();
+    bool recvClipboardDataRequest();
+    bool recvClipboardData();
+
+    void sendClipboardOffer(ClipboardID id, const ClipboardOffer& offer, std::uint32_t flags);
+    void sendClipboardTransfer(ClipboardID id, const ClipboardTransferPayload& payload);
+    void pushClipboardData(ClipboardID id, const MarshalledClipboardPtr& data);
+    bool wasClipboardDataPushed(const MarshalledClipboard& data) const;
 
 protected:
     struct ClientClipboard {
@@ -120,6 +137,21 @@ protected:
     // clipboard data being received from the client
     std::string m_clipboardRecvData;
     std::size_t m_clipboardRecvExpectedSize = 0;
+
+    // optional clipboard protocol features supported by the client (kClipboardCap*)
+    std::uint32_t m_clipboardCaps = 0;
+
+    // clipboard data being received from the client with kMsgDClipboardData.  the server
+    // enforces its configured size limit once the contents have arrived.
+    ClipboardTransferReceiver m_clipboardReceiver{(std::numeric_limits<std::size_t>::max)()};
+
+    // the last contents offered to the client for each clipboard
+    std::optional<ClipboardOffer> m_clipboardOffered[kClipboardEnd];
+
+    // the hash of the last contents whose data was sent to the client.  the client has a
+    // single system clipboard for both clipboards on most platforms, so the same data does not
+    // need to be sent twice.
+    std::optional<std::uint64_t> m_clipboardPushedHash;
 
 protected:
     typedef bool (ClientProxy1_6::*MessageParser)(const std::uint8_t*);

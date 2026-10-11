@@ -109,6 +109,27 @@ public:
     */
     virtual MarshalledClipboardPtr getClipboardSnapshot(ClipboardID id) const = 0;
 
+    //! Test if the screen supports clipboard offers
+    /*!
+    Returns true if the screen can put offered clipboard contents on the system clipboard
+    without their data and obtain the data only when an application asks for it (delayed
+    rendering). The screen then sends a \c CLIPBOARD_DATA_REQUESTED event and the data must be
+    supplied with setClipboardData() or declined with clipboardDataUnavailable().
+    */
+    virtual bool supportsClipboardOffers() const = 0;
+
+    //! Put offered contents on the clipboard
+    /*!
+    Only called if supportsClipboardOffers() returns true.
+    */
+    virtual void setClipboardOffer(ClipboardID id, const ClipboardOffer& offer) = 0;
+
+    //! Decline a request for offered contents
+    /*!
+    Tells the screen that the data of \c offer cannot be obtained.
+    */
+    virtual void clipboardDataUnavailable(ClipboardID id, const ClipboardOffer& offer) = 0;
+
     //! Check clipboard owner
     /*!
     Check ownership of all clipboards and post grab events for any that

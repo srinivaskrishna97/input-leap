@@ -206,6 +206,30 @@ void ClientConnectionLoggingWrapper::send_grab_clipboard(ClipboardID id)
     conn_->send_grab_clipboard(id);
 }
 
+void ClientConnectionLoggingWrapper::send_clipboard_data_chunk(const ClipboardChunk& chunk)
+{
+    if (chunk.mark_ == kDataStart) {
+        LOG_DEBUG1("sending clipboard %d data to \"%s\": %s", chunk.id_, name_.c_str(),
+                   chunk.data_.c_str());
+    }
+    conn_->send_clipboard_data_chunk(chunk);
+}
+
+void ClientConnectionLoggingWrapper::send_clipboard_offer(ClipboardID id, std::uint32_t flags,
+                                                          const ClipboardOffer& offer)
+{
+    LOG_DEBUG1("send clipboard %d offer to \"%s\": size=%u formats=0x%x flags=0x%x", id,
+               name_.c_str(), offer.size, offer.formats, flags);
+    conn_->send_clipboard_offer(id, flags, offer);
+}
+
+void ClientConnectionLoggingWrapper::send_clipboard_data_request(ClipboardID id,
+                                                                 std::uint64_t hash)
+{
+    LOG_DEBUG1("send clipboard %d data request to \"%s\"", id, name_.c_str());
+    conn_->send_clipboard_data_request(id, hash);
+}
+
 void ClientConnectionLoggingWrapper::flush()
 {
     conn_->flush();

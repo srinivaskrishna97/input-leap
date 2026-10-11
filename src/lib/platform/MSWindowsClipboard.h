@@ -67,6 +67,28 @@ public:
 
     void setFacade(IMSWindowsClipboardFacade& facade);
 
+    //! Get the Windows clipboard format of a format
+    /*!
+    Returns the Windows clipboard format that \c format is stored in, or 0 if \c format is not
+    supported.
+    */
+    UINT getWin32Format(EFormat format) const;
+
+    //! Get the format stored in a Windows clipboard format
+    /*!
+    Returns false if \c win32Format does not hold any supported format.
+    */
+    bool getFormatForWin32(UINT win32Format, EFormat& format) const;
+
+    //! Announce a format without its data
+    /*!
+    Puts \c format on the clipboard without data (delayed rendering). The owner of the
+    clipboard receives WM_RENDERFORMAT when an application requests the data and must then
+    provide it with add(). Must be called between a successful open() and close(), after
+    clear().
+    */
+    void addDelayed(EFormat format);
+
 private:
     void clearConverters();
 

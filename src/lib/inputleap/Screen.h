@@ -106,6 +106,18 @@ public:
     */
     void setClipboardData(ClipboardID, const MarshalledClipboardPtr& data);
 
+    //! Put offered clipboard contents on the clipboard
+    /*!
+    See IPlatformScreen::setClipboardOffer().
+    */
+    void setClipboardOffer(ClipboardID, const ClipboardOffer& offer);
+
+    //! Decline a request for offered clipboard contents
+    /*!
+    See IPlatformScreen::clipboardDataUnavailable().
+    */
+    void clipboardDataUnavailable(ClipboardID, const ClipboardOffer& offer);
+
     //! Grab clipboard
     /*!
     Grabs (i.e. take ownership of) the system clipboard.
@@ -315,6 +327,12 @@ public:
     See IPlatformScreen::getClipboardSnapshot().
     */
     MarshalledClipboardPtr getClipboardSnapshot(ClipboardID id) const;
+
+    //! Test if the screen supports clipboard offers
+    /*!
+    See IPlatformScreen::supportsClipboardOffers().
+    */
+    bool supportsClipboardOffers() const;
 
     void getShape(std::int32_t& x, std::int32_t& y, std::int32_t& width,
                   std::int32_t& height) const override;

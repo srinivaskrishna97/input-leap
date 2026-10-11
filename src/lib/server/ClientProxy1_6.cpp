@@ -64,7 +64,13 @@ ClientProxy1_6::ClientProxy1_6(const std::string& name,
 
     m_clipboardStreamer = std::make_unique<ClipboardStreamer>(
                 m_events, get_conn().get_event_target(),
-                [this](const ClipboardChunk& chunk) { get_conn().send_clipboard_chunk_1_6(chunk); });
+                [this](const ClipboardChunk& chunk, bool encoded) {
+                    if (encoded) {
+                        get_conn().send_clipboard_data_chunk(chunk);
+                    } else {
+                        get_conn().send_clipboard_chunk_1_6(chunk);
+                    }
+                });
 
     setHeartbeatRate(kHeartRate, kHeartRate * kHeartBeatsUntilDeath);
 
@@ -250,6 +256,18 @@ bool ClientProxy1_6::parseMessage(const std::uint8_t* code)
     else if (memcmp(code, kMsgDClipboard, 4) == 0) {
         return recvClipboard();
     }
+    else if (memcmp(code, kMsgCClipboardCapabilities, 4) == 0) {
+        return recvClipboardCapabilities();
+    }
+    else if (memcmp(code, kMsgDClipboardOffer, 4) == 0) {
+        return recvClipboardOffer();
+    }
+    else if (memcmp(code, kMsgQClipboardData, 4) == 0) {
+        return recvClipboardDataRequest();
+    }
+    else if (memcmp(code, kMsgDClipboardData, 4) == 0) {
+        return recvClipboardData();
+    }
     return false;
 }
 
@@ -323,6 +341,29 @@ void ClientProxy1_6::setClipboard(ClipboardID id, const IClipboard* clipboard)
 
 void ClientProxy1_6::setClipboardData(ClipboardID id, const MarshalledClipboardPtr& data)
 {
+    const auto& contents = data ? data : empty_marshalled_clipboard();
+
+    if (supportsClipboardOffers()) {
+        if (m_clipboard[id].m_dirty) {
+            // the client gets the offer and requests the data when it needs it.  small contents
+            // are sent right away so that pasting them does not have to wait.
+            m_clipboard[id].m_dirty = false;
+            bool push = contents->size() <= kClipboardEagerSize &&
+                        !wasClipboardDataPushed(*contents);
+            sendClipboardOffer(id, ClipboardOffer::describe(*contents),
+                               push ? kClipboardOfferDataFollows : 0);
+            if (push) {
+                pushClipboardData(id, contents);
+            }
+        } else if (m_clipboardOffered[id] && m_clipboardOffered[id]->describes(*contents) &&
+                   contents->size() <= kClipboardEagerSize &&
+                   !wasClipboardDataPushed(*contents)) {
+            // the contents were offered before their data was known
+            pushClipboardData(id, contents);
+        }
+        return;
+    }
+
     // ignore if this clipboard is already clean
     if (!m_clipboard[id].m_dirty) {
         return;
@@ -330,13 +371,86 @@ void ClientProxy1_6::setClipboardData(ClipboardID id, const MarshalledClipboardP
 
     // this clipboard is now clean
     m_clipboard[id].m_dirty = false;
-    m_clipboard[id].m_data = data ? data : empty_marshalled_clipboard();
+    m_clipboard[id].m_data = contents;
 
     LOG_DEBUG("sending clipboard %d to \"%s\", size=%zu", id, getName().c_str(),
-              m_clipboard[id].m_data->size());
+              contents->size());
 
     // the data is sent in the background so that it does not delay input
-    m_clipboardStreamer->send(id, 0, m_clipboard[id].m_data);
+    m_clipboardStreamer->send(id, 0, contents);
+}
+
+bool ClientProxy1_6::supportsClipboardOffers() const
+{
+    return (m_clipboardCaps & kClipboardCapOffers) != 0;
+}
+
+void ClientProxy1_6::setClipboardOffer(ClipboardID id, const ClipboardOffer& offer)
+{
+    // ignore if this clipboard is already clean
+    if (!supportsClipboardOffers() || !m_clipboard[id].m_dirty) {
+        return;
+    }
+    m_clipboard[id].m_dirty = false;
+    sendClipboardOffer(id, offer, 0);
+}
+
+void ClientProxy1_6::requestClipboardData(ClipboardID id, const ClipboardOffer& offer)
+{
+    if (!supportsClipboardOffers()) {
+        return;
+    }
+    LOG_DEBUG("requesting clipboard %d from \"%s\", size=%u", id, getName().c_str(), offer.size);
+    get_conn().send_clipboard_data_request(id, offer.hash);
+}
+
+void ClientProxy1_6::provideClipboardData(ClipboardID id, const MarshalledClipboardPtr& data)
+{
+    if (!supportsClipboardOffers()) {
+        BaseClientProxy::provideClipboardData(id, data);
+        return;
+    }
+    pushClipboardData(id, data ? data : empty_marshalled_clipboard());
+}
+
+void ClientProxy1_6::provideClipboardUnavailable(ClipboardID id, const ClipboardOffer& offer)
+{
+    if (!supportsClipboardOffers()) {
+        return;
+    }
+    LOG_DEBUG("clipboard %d requested by \"%s\" is not available", id, getName().c_str());
+    sendClipboardTransfer(id, make_unavailable_clipboard_transfer(offer.hash));
+}
+
+void ClientProxy1_6::sendClipboardOffer(ClipboardID id, const ClipboardOffer& offer,
+                                        std::uint32_t flags)
+{
+    // data of older contents of this clipboard is outdated now
+    m_clipboardStreamer->cancel(id);
+    m_clipboardOffered[id] = offer;
+    LOG_DEBUG("offering clipboard %d to \"%s\", size=%u", id, getName().c_str(), offer.size);
+    get_conn().send_clipboard_offer(id, flags, offer);
+}
+
+void ClientProxy1_6::sendClipboardTransfer(ClipboardID id, const ClipboardTransferPayload& payload)
+{
+    // the data is sent in the background so that it does not delay input
+    m_clipboardStreamer->send_encoded(id, 0, payload.header.format(), payload.bytes);
+}
+
+void ClientProxy1_6::pushClipboardData(ClipboardID id, const MarshalledClipboardPtr& data)
+{
+    bool compress = (m_clipboardCaps & kClipboardCapCompression) != 0;
+    auto payload = make_clipboard_transfer(data, compress);
+    LOG_DEBUG("sending clipboard %d to \"%s\", size=%zu, sent=%llu", id, getName().c_str(),
+              data->size(), static_cast<unsigned long long>(payload.header.encoded_size));
+    sendClipboardTransfer(id, payload);
+    m_clipboardPushedHash = data->hash();
+}
+
+bool ClientProxy1_6::wasClipboardDataPushed(const MarshalledClipboard& data) const
+{
+    return m_clipboardPushedHash && *m_clipboardPushedHash == data.hash();
 }
 
 void ClientProxy1_6::grabClipboard(ClipboardID id)
@@ -498,6 +612,120 @@ bool ClientProxy1_6::recvClipboard()
     return true;
 }
 
+bool ClientProxy1_6::recvClipboardCapabilities()
+{
+    std::uint32_t caps = 0;
+    if (!ProtocolUtil::readf(getStream(), kMsgCClipboardCapabilities + 4, &caps)) {
+        return false;
+    }
+    m_clipboardCaps = caps & kClipboardCapsSupported;
+    LOG_DEBUG("client \"%s\" clipboard capabilities: 0x%x", getName().c_str(), m_clipboardCaps);
+    return true;
+}
+
+bool ClientProxy1_6::recvClipboardOffer()
+{
+    if (!supportsClipboardOffers()) {
+        return false;
+    }
+
+    ClipboardID id;
+    std::uint32_t seq, flags, formats, size, hashHigh, hashLow;
+    if (!ProtocolUtil::readf(getStream(), kMsgDClipboardOffer + 4, &id, &seq, &flags, &formats,
+                             &size, &hashHigh, &hashLow)) {
+        return false;
+    }
+    if (id >= kClipboardEnd) {
+        return false;
+    }
+
+    ClipboardOfferInfo info;
+    info.id = id;
+    info.sequence = seq;
+    info.flags = flags;
+    info.offer.formats = formats;
+    info.offer.size = size;
+    info.offer.hash = (static_cast<std::uint64_t>(hashHigh) << 32) | hashLow;
+    LOG_DEBUG("received client \"%s\" clipboard %d offer seqnum=%d size=%u",
+              getName().c_str(), id, seq, size);
+
+    m_events->add_event(EventType::CLIPBOARD_OFFERED, get_event_target(),
+                        create_event_data<ClipboardOfferInfo>(info));
+    return true;
+}
+
+bool ClientProxy1_6::recvClipboardDataRequest()
+{
+    if (!supportsClipboardOffers()) {
+        return false;
+    }
+
+    ClipboardID id;
+    std::uint32_t hashHigh, hashLow;
+    if (!ProtocolUtil::readf(getStream(), kMsgQClipboardData + 4, &id, &hashHigh, &hashLow)) {
+        return false;
+    }
+    if (id >= kClipboardEnd) {
+        return false;
+    }
+
+    ClipboardOfferInfo info;
+    info.id = id;
+    info.offer.hash = (static_cast<std::uint64_t>(hashHigh) << 32) | hashLow;
+    LOG_DEBUG("client \"%s\" requested clipboard %d", getName().c_str(), id);
+
+    m_events->add_event(EventType::CLIPBOARD_DATA_REQUESTED, get_event_target(),
+                        create_event_data<ClipboardOfferInfo>(info));
+    return true;
+}
+
+bool ClientProxy1_6::recvClipboardData()
+{
+    if (!supportsClipboardOffers()) {
+        return false;
+    }
+
+    ClipboardID id;
+    std::uint32_t seq;
+    std::uint8_t mark;
+    std::string data;
+    if (!ProtocolUtil::readf(getStream(), kMsgDClipboardData + 4, &id, &seq, &mark, &data)) {
+        return false;
+    }
+    if (id >= kClipboardEnd) {
+        return false;
+    }
+
+    auto status = m_clipboardReceiver.add(mark, data);
+    if (status == ClipboardTransferReceiver::Status::InProgress) {
+        return true;
+    }
+
+    if (status == ClipboardTransferReceiver::Status::Complete) {
+        auto contents = m_clipboardReceiver.take();
+        LOG_DEBUG("received client \"%s\" clipboard %d seqnum=%d, size=%zu",
+                  getName().c_str(), id, seq, contents->size());
+        m_clipboard[id].m_data = std::move(contents);
+        m_clipboard[id].m_sequenceNumber = seq;
+
+        ClipboardInfo info;
+        info.m_id = id;
+        info.m_sequenceNumber = seq;
+        m_events->add_event(EventType::CLIPBOARD_CHANGED, get_event_target(),
+                            create_event_data<ClipboardInfo>(info));
+        return true;
+    }
+
+    // the client cannot provide the requested contents or sent a broken transfer
+    ClipboardOfferInfo info;
+    info.id = id;
+    info.sequence = seq;
+    info.offer.hash = m_clipboardReceiver.header().hash;
+    m_events->add_event(EventType::CLIPBOARD_DATA_UNAVAILABLE, get_event_target(),
+                        create_event_data<ClipboardOfferInfo>(info));
+    return true;
+}
+
 bool ClientProxy1_6::recvGrabClipboard()
 {
     // parse message
@@ -512,6 +740,9 @@ bool ClientProxy1_6::recvGrabClipboard()
     if (id >= kClipboardEnd) {
         return false;
     }
+
+    // the client's clipboard has changed, so data sent before is not there anymore
+    m_clipboardPushedHash.reset();
 
     // notify
     ClipboardInfo info;

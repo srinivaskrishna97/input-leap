@@ -67,9 +67,9 @@ ServerProxy::ServerProxy(Client* client, inputleap::IStream* stream, IEventQueue
 
     m_clipboardStreamer = std::make_unique<ClipboardStreamer>(
                 m_events, m_stream->get_event_target(),
-                [this](const ClipboardChunk& chunk) {
-                    ProtocolUtil::writef(m_stream, kMsgDClipboard, chunk.id_, chunk.sequence_,
-                                         chunk.mark_, &chunk.data_);
+                [this](const ClipboardChunk& chunk, bool encoded) {
+                    ProtocolUtil::writef(m_stream, encoded ? kMsgDClipboardData : kMsgDClipboard,
+                                         chunk.id_, chunk.sequence_, chunk.mark_, &chunk.data_);
                 });
 
     // send heartbeat
@@ -307,6 +307,21 @@ ServerProxy::EResult ServerProxy::parseMessage(const std::uint8_t* code)
     else if (memcmp(code, kMsgDFileTransfer, 4) == 0) {
         fileChunkReceived();
     }
+
+    else if (memcmp(code, kMsgDClipboardOffer, 4) == 0 &&
+             (m_clipboardCaps & kClipboardCapOffers) != 0) {
+        clipboardOffer();
+    }
+
+    else if (memcmp(code, kMsgQClipboardData, 4) == 0 &&
+             (m_clipboardCaps & kClipboardCapOffers) != 0) {
+        clipboardDataRequest();
+    }
+
+    else if (memcmp(code, kMsgDClipboardData, 4) == 0 &&
+             (m_clipboardCaps & kClipboardCapOffers) != 0) {
+        clipboardData();
+    }
     else if (memcmp(code, kMsgDDragInfo, 4) == 0) {
         dragInfoReceived();
     }
@@ -372,7 +387,128 @@ ServerProxy::onClipboardChanged(ClipboardID id, const IClipboard* clipboard)
 void ServerProxy::onClipboardChanged(ClipboardID id, const MarshalledClipboardPtr& data)
 {
     LOG_DEBUG("sending clipboard %d seqnum=%d size=%zu", id, m_seqNum, data ? data->size() : 0);
-    m_clipboardStreamer->send(id, m_seqNum, data);
+    if ((m_clipboardCaps & kClipboardCapOffers) != 0) {
+        bool compress = (m_clipboardCaps & kClipboardCapCompression) != 0;
+        sendClipboardTransfer(id, make_clipboard_transfer(data, compress));
+    } else {
+        m_clipboardStreamer->send(id, m_seqNum, data);
+    }
+}
+
+void ServerProxy::onClipboardOffered(ClipboardID id, const ClipboardOffer& offer,
+                                     std::uint32_t flags)
+{
+    LOG_DEBUG("offering clipboard %d seqnum=%d size=%u", id, m_seqNum, offer.size);
+
+    // data of older contents of this clipboard is outdated now
+    m_clipboardStreamer->cancel(id);
+    ProtocolUtil::writef(m_stream, kMsgDClipboardOffer, id, m_seqNum, flags, offer.formats,
+                         offer.size, static_cast<std::uint32_t>(offer.hash >> 32),
+                         static_cast<std::uint32_t>(offer.hash));
+}
+
+void ServerProxy::requestClipboardData(ClipboardID id, const ClipboardOffer& offer)
+{
+    LOG_DEBUG("requesting clipboard %d size=%u", id, offer.size);
+    ProtocolUtil::writef(m_stream, kMsgQClipboardData, id,
+                         static_cast<std::uint32_t>(offer.hash >> 32),
+                         static_cast<std::uint32_t>(offer.hash));
+}
+
+void ServerProxy::provideClipboardData(ClipboardID id, const MarshalledClipboardPtr& data)
+{
+    bool compress = (m_clipboardCaps & kClipboardCapCompression) != 0;
+    sendClipboardTransfer(id, make_clipboard_transfer(data, compress));
+}
+
+void ServerProxy::provideClipboardUnavailable(ClipboardID id, const ClipboardOffer& offer)
+{
+    LOG_DEBUG("clipboard %d requested by the server is not available", id);
+    sendClipboardTransfer(id, make_unavailable_clipboard_transfer(offer.hash));
+}
+
+void ServerProxy::sendClipboardTransfer(ClipboardID id, const ClipboardTransferPayload& payload)
+{
+    // the data is sent in the background so that it does not delay other messages
+    m_clipboardStreamer->send_encoded(id, m_seqNum, payload.header.format(), payload.bytes);
+}
+
+void ServerProxy::clipboardOffer()
+{
+    // parse
+    ClipboardID id;
+    std::uint32_t seq, flags, formats, size, hashHigh, hashLow;
+    if (!ProtocolUtil::readf(m_stream, kMsgDClipboardOffer + 4, &id, &seq, &flags, &formats,
+                             &size, &hashHigh, &hashLow)) {
+        return;
+    }
+    if (id >= kClipboardEnd) {
+        return;
+    }
+
+    ClipboardOffer offer;
+    offer.formats = formats;
+    offer.size = size;
+    offer.hash = (static_cast<std::uint64_t>(hashHigh) << 32) | hashLow;
+    LOG_DEBUG("recv clipboard %d offer size=%u flags=0x%x", id, size, flags);
+
+    // forward
+    m_client->setClipboardOffer(id, offer, flags);
+}
+
+void ServerProxy::clipboardDataRequest()
+{
+    // parse
+    ClipboardID id;
+    std::uint32_t hashHigh, hashLow;
+    if (!ProtocolUtil::readf(m_stream, kMsgQClipboardData + 4, &id, &hashHigh, &hashLow)) {
+        return;
+    }
+    if (id >= kClipboardEnd) {
+        return;
+    }
+
+    ClipboardOffer offer;
+    offer.hash = (static_cast<std::uint64_t>(hashHigh) << 32) | hashLow;
+    LOG_DEBUG("recv clipboard %d data request", id);
+
+    // forward
+    m_client->clipboardDataRequested(id, offer);
+}
+
+void ServerProxy::clipboardData()
+{
+    // parse
+    ClipboardID id;
+    std::uint32_t seq;
+    std::uint8_t mark;
+    std::string data;
+    if (!ProtocolUtil::readf(m_stream, kMsgDClipboardData + 4, &id, &seq, &mark, &data)) {
+        return;
+    }
+    if (id >= kClipboardEnd) {
+        return;
+    }
+
+    auto status = m_clipboardReceiver.add(mark, data);
+    if (status == ClipboardTransferReceiver::Status::InProgress) {
+        return;
+    }
+
+    if (status == ClipboardTransferReceiver::Status::Complete) {
+        auto contents = m_clipboardReceiver.take();
+        LOG_DEBUG("received clipboard %d size=%zu", id, contents->size());
+
+        // forward.  the screen may apply the data in the background.
+        m_client->setOfferedClipboardData(id, contents);
+        LOG_INFO("clipboard was updated");
+        return;
+    }
+
+    // the server cannot provide the requested contents or sent a broken transfer
+    ClipboardOffer offer;
+    offer.hash = m_clipboardReceiver.header().hash;
+    m_client->clipboardDataUnavailable(id, offer);
 }
 
 void
@@ -801,6 +937,9 @@ ServerProxy::resetOptions()
     // reset keep alive
     setKeepAliveRate(kKeepAliveRate);
 
+    // the server announces its clipboard features again
+    m_clipboardCaps = 0;
+
     // reset modifier translation table
     for (KeyModifierID id = 0; id < kKeyModifierIDLast; ++id) {
         m_modifierTranslationTable[id] = id;
@@ -842,6 +981,18 @@ ServerProxy::setOptions()
         else if (options[i] == kOptionHeartbeat) {
             // update keep alive
             setKeepAliveRate(1.0e-3 * static_cast<double>(options[i + 1]));
+        }
+        else if (options[i] == kOptionClipboardSharingSize) {
+            m_clipboardReceiver.set_max_size(options[i + 1]);
+        }
+        else if (options[i] == kOptionClipboardCapabilities) {
+            // the server supports optional clipboard features; tell it which ones to use
+            std::uint32_t caps = options[i + 1] & kClipboardCapsSupported;
+            if (caps != 0) {
+                m_clipboardCaps = caps;
+                LOG_DEBUG("using clipboard capabilities 0x%x", caps);
+                ProtocolUtil::writef(m_stream, kMsgCClipboardCapabilities, caps);
+            }
         }
 
         if (id != kKeyModifierIDNull) {

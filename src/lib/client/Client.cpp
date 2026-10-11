@@ -270,6 +270,59 @@ void Client::setClipboardData(ClipboardID id, const MarshalledClipboardPtr& data
     m_screen->setClipboardData(id, data);
     m_ownClipboard[id]  = false;
     m_sentClipboard[id] = false;
+    m_offeredClipboard[id].reset();
+}
+
+void Client::setClipboardOffer(ClipboardID id, const ClipboardOffer& offer, std::uint32_t flags)
+{
+    m_offeredClipboard[id] = offer;
+    m_ownClipboard[id]  = false;
+    m_sentClipboard[id] = false;
+
+    if (m_screen->supportsClipboardOffers()) {
+        // the contents are put on the clipboard without their data, which is requested when
+        // an application pastes them
+        m_screen->setClipboardOffer(id, offer);
+    } else if ((flags & kClipboardOfferDataFollows) == 0) {
+        // the screen cannot wait with the data until it is pasted, so get it now
+        m_server->requestClipboardData(id, offer);
+    }
+}
+
+void Client::setOfferedClipboardData(ClipboardID id, const MarshalledClipboardPtr& data)
+{
+    // Ignore outdated data, e.g. data that was still on its way when newer contents were
+    // offered. The contents may have been offered as either clipboard.
+    bool wanted = false;
+    for (ClipboardID other = 0; other < kClipboardEnd; ++other) {
+        if (m_offeredClipboard[other] && m_offeredClipboard[other]->describes(*data)) {
+            wanted = true;
+        }
+    }
+    if (!wanted) {
+        LOG_DEBUG("ignored outdated data of clipboard %d", id);
+        return;
+    }
+
+    m_screen->setClipboardData(id, data);
+}
+
+void Client::clipboardDataUnavailable(ClipboardID id, const ClipboardOffer& offer)
+{
+    m_screen->clipboardDataUnavailable(id, offer);
+}
+
+void Client::clipboardDataRequested(ClipboardID id, const ClipboardOffer& offer)
+{
+    // the offered contents are the ones that were last sent for one of the clipboards
+    for (ClipboardID other = 0; other < kClipboardEnd; ++other) {
+        const auto& data = m_dataClipboard[other];
+        if (data && data->hash() == offer.hash) {
+            m_server->provideClipboardData(id, data);
+            return;
+        }
+    }
+    m_server->provideClipboardUnavailable(id, offer);
 }
 
 void
@@ -402,7 +455,7 @@ Client::sendClipboard(ClipboardID id)
         if (!m_sentClipboard[id] || !same_clipboard_contents(data, m_dataClipboard[id])) {
             m_sentClipboard[id] = true;
             m_dataClipboard[id] = data;
-            m_server->onClipboardChanged(id, data);
+            sendClipboardContents(id, data);
         }
         return;
     }
@@ -435,8 +488,27 @@ Client::sendClipboard(ClipboardID id)
         if (!m_sentClipboard[id] || !same_clipboard_contents(data, m_dataClipboard[id])) {
             m_sentClipboard[id] = true;
             m_dataClipboard[id] = data;
-            m_server->onClipboardChanged(id, data);
+            sendClipboardContents(id, data);
         }
+    }
+}
+
+void Client::sendClipboardContents(ClipboardID id, const MarshalledClipboardPtr& data)
+{
+    if ((m_server->clipboardCapabilities() & kClipboardCapOffers) == 0) {
+        m_server->onClipboardChanged(id, data);
+        return;
+    }
+
+    // Offer the contents; the server asks for them when they are needed. Small contents are
+    // sent right away, unless they were sent before for the other clipboard.
+    bool push = data->size() <= kClipboardEagerSize &&
+                !(m_pushedClipboardHash && *m_pushedClipboardHash == data->hash());
+    m_server->onClipboardOffered(id, ClipboardOffer::describe(*data),
+                                 push ? kClipboardOfferDataFollows : 0);
+    if (push) {
+        m_server->onClipboardChanged(id, data);
+        m_pushedClipboardHash = data->hash();
     }
 }
 
@@ -511,6 +583,8 @@ Client::setupScreen()
                           [this](const auto& e){ handle_clipboard_grabbed(e); });
     m_events->add_handler(EventType::CLIPBOARD_CHANGED, get_event_target(),
                           [this](const auto& e){ handle_clipboard_changed(e); });
+    m_events->add_handler(EventType::CLIPBOARD_DATA_REQUESTED, get_event_target(),
+                          [this](const auto& e){ handle_clipboard_data_requested(e); });
 }
 
 void
@@ -558,6 +632,7 @@ Client::cleanupScreen()
         m_events->remove_handler(EventType::SCREEN_SHAPE_CHANGED, get_event_target());
         m_events->remove_handler(EventType::CLIPBOARD_GRABBED, get_event_target());
         m_events->remove_handler(EventType::CLIPBOARD_CHANGED, get_event_target());
+        m_events->remove_handler(EventType::CLIPBOARD_DATA_REQUESTED, get_event_target());
         delete m_server;
         m_server = nullptr;
     }
@@ -655,6 +730,7 @@ void Client::handle_clipboard_grabbed(const Event& event)
     m_ownClipboard[info.m_id]  = true;
     m_sentClipboard[info.m_id] = false;
     m_timeClipboard[info.m_id] = 0;
+    m_offeredClipboard[info.m_id].reset();
 
     // if we're not the active screen then send the clipboard now,
     // otherwise we'll wait until we leave.
@@ -679,6 +755,30 @@ void Client::handle_clipboard_changed(const Event& event)
     if (m_ownClipboard[info.m_id] && !m_active) {
         sendClipboard(info.m_id);
     }
+}
+
+void Client::handle_clipboard_data_requested(const Event& event)
+{
+    const auto& info = event.get_data_as<ClipboardOfferInfo>();
+    if (m_server == nullptr || !m_ready) {
+        // the contents cannot be obtained, so don't let the paste wait for them
+        m_screen->clipboardDataUnavailable(info.id, info.offer);
+        return;
+    }
+
+    // an application pastes offered contents, so get them from the server.  screens with a
+    // single system clipboard request them as any clipboard that offered them.
+    ClipboardID id = info.id;
+    for (ClipboardID other = 0; other < kClipboardEnd; ++other) {
+        if (m_offeredClipboard[other] && m_offeredClipboard[other]->hash == info.offer.hash) {
+            id = other;
+            break;
+        }
+    }
+    if (id >= kClipboardEnd) {
+        return;
+    }
+    m_server->requestClipboardData(id, info.offer);
 }
 
 void Client::handle_hello()

@@ -249,6 +249,34 @@ extern const char*        kMsgDMouseWheel1_0;
 // identifier.
 extern const char*        kMsgDClipboard;
 
+// clipboard offer:  primary <-> secondary
+// announces the contents of a clipboard without sending them.  only used once
+// kClipboardCapOffers has been negotiated.  $1 = clipboard identifier, $2 = sequence number
+// (as for kMsgDClipboard), $3 = flags (kClipboardOfferDataFollows), $4 = formats present
+// (bit 1 << IClipboard::EFormat for each format), $5 = size of the marshalled contents,
+// $6 = high and $7 = low 32 bits of the hash of the marshalled contents
+// (MarshalledClipboard::hash()).
+extern const char*        kMsgDClipboardOffer;
+
+// clipboard data request:  primary <-> secondary
+// asks the receiver to send offered clipboard contents with kMsgDClipboardData.  only used
+// once kClipboardCapOffers has been negotiated.  $1 = clipboard identifier, $2 = high and
+// $3 = low 32 bits of the hash of the offered contents.
+extern const char*        kMsgQClipboardData;
+
+// clipboard data:  primary <-> secondary
+// like kMsgDClipboard, but the start chunk ($3 == kDataStart) carries a header that
+// describes the contents and their encoding (see ClipboardTransfer.h), so that they can be
+// compressed and verified.  only used once kClipboardCapOffers has been negotiated.
+// $1 = clipboard identifier, $2 = sequence number, $3 = mark, $4 = data.
+extern const char*        kMsgDClipboardData;
+
+// clipboard capabilities:  secondary -> primary
+// sent in reply to the kOptionClipboardCapabilities option.  $1 = the clipboard capabilities
+// (kClipboardCap*) supported by both sides.  never sent to servers that did not send the
+// option.
+extern const char*        kMsgCClipboardCapabilities;
+
 // client data:  secondary -> primary
 // $1 = coordinate of leftmost pixel on secondary screen,
 // $2 = coordinate of topmost pixel on secondary screen,

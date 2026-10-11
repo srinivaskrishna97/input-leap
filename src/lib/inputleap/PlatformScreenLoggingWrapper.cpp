@@ -83,6 +83,24 @@ MarshalledClipboardPtr PlatformScreenLoggingWrapper::getClipboardSnapshot(Clipbo
     return result;
 }
 
+bool PlatformScreenLoggingWrapper::supportsClipboardOffers() const
+{
+    return screen_->supportsClipboardOffers();
+}
+
+void PlatformScreenLoggingWrapper::setClipboardOffer(ClipboardID id, const ClipboardOffer& offer)
+{
+    screen_->setClipboardOffer(id, offer);
+    LOG_DEBUG1("PlatformScreen::setClipboardOffer() id=%d size=%u", id, offer.size);
+}
+
+void PlatformScreenLoggingWrapper::clipboardDataUnavailable(ClipboardID id,
+                                                           const ClipboardOffer& offer)
+{
+    screen_->clipboardDataUnavailable(id, offer);
+    LOG_DEBUG1("PlatformScreen::clipboardDataUnavailable() id=%d", id);
+}
+
 void PlatformScreenLoggingWrapper::checkClipboards()
 {
     LOG_DEBUG1("PlatformScreen::checkClipboards()");

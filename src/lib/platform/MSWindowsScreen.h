@@ -116,6 +116,9 @@ public:
     bool setClipboardData(ClipboardID id, const MarshalledClipboardPtr& data) override;
     bool hasClipboardSnapshots() const override;
     MarshalledClipboardPtr getClipboardSnapshot(ClipboardID id) const override;
+    bool supportsClipboardOffers() const override;
+    void setClipboardOffer(ClipboardID id, const ClipboardOffer& offer) override;
+    void clipboardDataUnavailable(ClipboardID id, const ClipboardOffer& offer) override;
     virtual void checkClipboards();
     virtual void openScreensaver(bool notify);
     virtual void closeScreensaver();
@@ -195,6 +198,9 @@ private: // HACK
 
     // the clipboard worker has captured the clipboard
     void handle_clipboard_captured();
+
+    // an application wants to paste offered clipboard contents
+    void handle_clipboard_data_needed(const Event& event);
 
     // fix the clipboard viewer chain
     void fixClipboardViewer();

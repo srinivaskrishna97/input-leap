@@ -143,6 +143,27 @@ void ClientConnectionByStream::send_grab_clipboard(ClipboardID id)
     ProtocolUtil::writef(stream_.get(), kMsgCClipboard, id, 0);
 }
 
+void ClientConnectionByStream::send_clipboard_data_chunk(const ClipboardChunk& chunk)
+{
+    ProtocolUtil::writef(stream_.get(), kMsgDClipboardData, chunk.id_, chunk.sequence_,
+                         chunk.mark_, &chunk.data_);
+}
+
+void ClientConnectionByStream::send_clipboard_offer(ClipboardID id, std::uint32_t flags,
+                                                    const ClipboardOffer& offer)
+{
+    // the primary always sends sequence number 0
+    ProtocolUtil::writef(stream_.get(), kMsgDClipboardOffer, id, 0, flags, offer.formats,
+                         offer.size, static_cast<std::uint32_t>(offer.hash >> 32),
+                         static_cast<std::uint32_t>(offer.hash));
+}
+
+void ClientConnectionByStream::send_clipboard_data_request(ClipboardID id, std::uint64_t hash)
+{
+    ProtocolUtil::writef(stream_.get(), kMsgQClipboardData, id,
+                         static_cast<std::uint32_t>(hash >> 32), static_cast<std::uint32_t>(hash));
+}
+
 void ClientConnectionByStream::flush()
 {
     stream_->flush();

@@ -82,6 +82,37 @@ public:
     */
     virtual void setClipboardData(ClipboardID id, const MarshalledClipboardPtr& data);
 
+    //! Test if the screen accepts clipboard offers
+    /*!
+    If true, the screen is sent offers of clipboard contents (see setClipboardOffer()) and asks
+    for the data with \c CLIPBOARD_DATA_REQUESTED events when it needs it.
+    */
+    virtual bool supportsClipboardOffers() const { return false; }
+
+    //! Offer clipboard contents to the screen
+    /*!
+    Announces the contents without their data. Like setClipboardData() this does nothing if
+    the screen's clipboard is not dirty. Only called if supportsClipboardOffers() returns true.
+    */
+    virtual void setClipboardOffer(ClipboardID id, const ClipboardOffer& offer) { }
+
+    //! Request clipboard contents from the screen
+    /*!
+    Asks the screen, which owns the clipboard and has offered its contents, to send them. The
+    contents arrive with a \c CLIPBOARD_CHANGED event, or a \c CLIPBOARD_DATA_UNAVAILABLE event is
+    sent if the screen cannot provide them.
+    */
+    virtual void requestClipboardData(ClipboardID id, const ClipboardOffer& offer) { }
+
+    //! Send requested clipboard contents to the screen
+    /*!
+    Unlike setClipboardData() this sends the data even if the clipboard is not dirty.
+    */
+    virtual void provideClipboardData(ClipboardID id, const MarshalledClipboardPtr& data);
+
+    //! Tell the screen that requested clipboard contents are not available
+    virtual void provideClipboardUnavailable(ClipboardID id, const ClipboardOffer& offer) { }
+
     //@}
 
     // IClient overrides

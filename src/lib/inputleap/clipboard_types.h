@@ -40,3 +40,29 @@ static const ClipboardID    kClipboardSelection = 1;
 // the number of clipboards (i.e. one greater than the last clipboard id)
 static const ClipboardID    kClipboardEnd       = 2;
 //@}
+
+//! @name Clipboard transfer capabilities
+//@{
+// Optional features of the clipboard protocol. The server announces the features that it
+// supports with the kOptionClipboardCapabilities option and a client that supports any of them
+// replies with kMsgCClipboardCapabilities. Only features supported by both sides are used, so
+// older clients and servers keep using kMsgDClipboard.
+
+// The contents of a clipboard are announced with kMsgDClipboardOffer and sent with
+// kMsgDClipboardData only when they are requested with kMsgQClipboardData, e.g. when the user
+// pastes. Contents of at most kClipboardEagerSize bytes are sent right after the offer.
+static const std::uint32_t kClipboardCapOffers      = 1u << 0;
+
+// kMsgDClipboardData may carry compressed contents.
+static const std::uint32_t kClipboardCapCompression = 1u << 1;
+
+// all capabilities implemented by this version
+static const std::uint32_t kClipboardCapsSupported  = kClipboardCapOffers |
+                                                      kClipboardCapCompression;
+
+// clipboard contents up to this size are sent along with the offer
+static const std::uint32_t kClipboardEagerSize      = 1024 * 1024;
+
+// kMsgDClipboardOffer flag: the contents follow in kMsgDClipboardData messages
+static const std::uint32_t kClipboardOfferDataFollows = 1u << 0;
+//@}

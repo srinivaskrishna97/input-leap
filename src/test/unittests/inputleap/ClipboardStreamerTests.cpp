@@ -31,7 +31,10 @@ class ClipboardStreamerTest : public ::testing::Test {
 protected:
     ClipboardStreamerTest() :
         streamer_{&events_, &stream_target_,
-                  [this](const ClipboardChunk& chunk) { chunks_.push_back(chunk); }}
+                  [this](const ClipboardChunk& chunk, bool encoded) {
+                      chunks_.push_back(chunk);
+                      encoded_.push_back(encoded);
+                  }}
     {
     }
 
@@ -87,6 +90,7 @@ protected:
     NiceMock<MockEventQueue> events_;
     EventTarget stream_target_;
     std::vector<ClipboardChunk> chunks_;
+    std::vector<bool> encoded_;
     ClipboardStreamer streamer_;
 };
 
@@ -213,6 +217,34 @@ TEST_F(ClipboardStreamerTest, encoded_transfer_uses_given_start_payload)
         }
     }
     EXPECT_EQ(data, *payload);
+    for (bool encoded : encoded_) {
+        EXPECT_TRUE(encoded);
+    }
+}
+
+TEST_F(ClipboardStreamerTest, plain_transfers_are_not_encoded)
+{
+    streamer_.send(0, 0, data_of_size(100 * 1000, 'p'));
+    flush_until_idle();
+    for (bool encoded : encoded_) {
+        EXPECT_FALSE(encoded);
+    }
+}
+
+TEST_F(ClipboardStreamerTest, cancel_one_clipboard)
+{
+    auto first = data_of_size(200 * 1000, 'f');
+    auto second = data_of_size(150 * 1000, 's');
+    streamer_.send(0, 0, first);
+    streamer_.send(1, 0, second);
+    streamer_.cancel(0);
+    flush_until_idle();
+
+    // the partially sent first transfer is never completed, the second one is
+    auto transfers = received();
+    ASSERT_EQ(transfers.size(), 1u);
+    EXPECT_EQ(transfers[0].first, 1);
+    EXPECT_EQ(transfers[0].second, second->data());
 }
 
 } // namespace inputleap

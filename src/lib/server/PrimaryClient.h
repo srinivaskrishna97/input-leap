@@ -19,6 +19,8 @@
 #pragma once
 
 #include "server/BaseClientProxy.h"
+
+#include <optional>
 #include "inputleap/Fwd.h"
 #include "inputleap/protocol_types.h"
 
@@ -136,6 +138,10 @@ public:
     // BaseClientProxy overrides
     MarshalledClipboardPtr getClipboardData(ClipboardID id) const override;
     void setClipboardData(ClipboardID id, const MarshalledClipboardPtr& data) override;
+    bool supportsClipboardOffers() const override;
+    void setClipboardOffer(ClipboardID id, const ClipboardOffer& offer) override;
+    void provideClipboardData(ClipboardID id, const MarshalledClipboardPtr& data) override;
+    void provideClipboardUnavailable(ClipboardID id, const ClipboardOffer& offer) override;
 
     void keyDown(KeyID, KeyModifierMask, KeyButton) override;
     void keyRepeat(KeyID, KeyModifierMask, std::int32_t count, KeyButton) override;
@@ -160,6 +166,9 @@ public:
 private:
     inputleap::Screen* m_screen;
     bool m_clipboardDirty[kClipboardEnd];
+
+    // contents put on the clipboard without their data
+    std::optional<ClipboardOffer> m_clipboardOffered[kClipboardEnd];
     std::int32_t m_fakeInputCount;
 };
 

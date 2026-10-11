@@ -58,6 +58,11 @@ public:
     void send_file_chunk_1_6(const FileChunk& chunk) override;
     void send_grab_clipboard(ClipboardID id) override;
 
+    void send_clipboard_data_chunk(const ClipboardChunk& chunk) override;
+    void send_clipboard_offer(ClipboardID id, std::uint32_t flags,
+                              const ClipboardOffer& offer) override;
+    void send_clipboard_data_request(ClipboardID id, std::uint64_t hash) override;
+
     void flush() override;
     void close() override;
 

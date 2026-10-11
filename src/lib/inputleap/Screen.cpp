@@ -166,6 +166,16 @@ void Screen::setClipboardData(ClipboardID id, const MarshalledClipboardPtr& data
     m_screen->setClipboardData(id, data);
 }
 
+void Screen::setClipboardOffer(ClipboardID id, const ClipboardOffer& offer)
+{
+    m_screen->setClipboardOffer(id, offer);
+}
+
+void Screen::clipboardDataUnavailable(ClipboardID id, const ClipboardOffer& offer)
+{
+    m_screen->clipboardDataUnavailable(id, offer);
+}
+
 void
 Screen::grabClipboard(ClipboardID id)
 {
@@ -475,6 +485,11 @@ bool Screen::hasClipboardSnapshots() const
 MarshalledClipboardPtr Screen::getClipboardSnapshot(ClipboardID id) const
 {
     return m_screen->getClipboardSnapshot(id);
+}
+
+bool Screen::supportsClipboardOffers() const
+{
+    return m_screen->supportsClipboardOffers();
 }
 
 void Screen::getShape(std::int32_t& x, std::int32_t& y, std::int32_t& w, std::int32_t& h) const

@@ -44,6 +44,7 @@
 #include "base/Log.h"
 #include "base/Time.h"
 
+#include <algorithm>
 #include <climits>
 #include <cstring>
 #include <cstdlib>
@@ -111,6 +112,7 @@ Server::Server(
 		clipboard.m_clipboardOwner  = primaryName;
 		clipboard.m_clipboardSeqNum = m_seqNum;
 		clipboard.m_clipboardData   = empty_marshalled_clipboard();
+		clipboard.m_clipboardOffer  = ClipboardOffer::describe(*clipboard.m_clipboardData);
 	}
 
     // install event handlers
@@ -455,13 +457,7 @@ void Server::switchScreen(BaseClientProxy* dst, std::int32_t x, std::int32_t y, 
 		if (m_enableClipboard) {
 			// send the clipboard data to new active screen
 			for (ClipboardID id = 0; id < kClipboardEnd; ++id) {
-				const auto& data = m_clipboards[id].m_clipboardData;
-				if (data->size() > m_maximumClipboardSize) {
-					continue;
-				}
-				// the client proxy sends the data in the background so that it does
-				// not delay the input that follows
-				m_active->setClipboardData(id, data);
+				sendClipboard(m_active, id);
 			}
 		}
 
@@ -1067,6 +1063,11 @@ Server::sendOptions(BaseClientProxy* client) const
 		}
 	}
 
+	// announce the optional clipboard protocol features supported by this server.  clients
+	// that support any of them reply with kMsgCClipboardCapabilities, older clients ignore it.
+	optionsList.push_back(kOptionClipboardCapabilities);
+	optionsList.push_back(kClipboardCapsSupported);
+
 	// send the options
 	client->resetOptions();
 	client->setOptions(optionsList);
@@ -1189,6 +1190,9 @@ void Server::handle_clipboard_grabbed(const Event& event, BaseClientProxy* grabb
 		return;
 	}
 
+	// pastes waiting for the previous contents won't get them
+	failClipboardRequests(info.m_id);
+
 	// mark screen as owning clipboard
     LOG_INFO("screen \"%s\" grabbed clipboard %d from \"%s\"", getName(grabber).c_str(),
          info.m_id, clipboard.m_clipboardOwner.c_str());
@@ -1197,6 +1201,8 @@ void Server::handle_clipboard_grabbed(const Event& event, BaseClientProxy* grabb
 
 	// clear the clipboard data (since it's not known at this point)
 	clipboard.m_clipboardData = empty_marshalled_clipboard();
+	clipboard.m_clipboardOffer = ClipboardOffer::describe(*clipboard.m_clipboardData);
+	clipboard.m_requestedFromOwner = false;
 
 	// tell all other screens to take ownership of clipboard.  tell the
 	// grabber that it's clipboard isn't dirty.
@@ -1230,6 +1236,68 @@ void Server::handle_clipboard_changed(const Event& event, BaseClientProxy* clien
         return;
     }
     onClipboardChanged(client, info.m_id, info.m_sequenceNumber);
+}
+
+void Server::handle_clipboard_offered(const Event& event, BaseClientProxy* client)
+{
+    if (!m_enableClipboard || (m_maximumClipboardSize == 0)) {
+        return;
+    }
+    // ignore events from unknown clients
+    if (m_clientSet.count(client) == 0) {
+        return;
+    }
+    const auto& info = event.get_data_as<ClipboardOfferInfo>();
+    if (info.id >= kClipboardEnd) {
+        return;
+    }
+
+    if (m_clipboards[info.id].m_clipboardOwner != getName(client)) {
+        LOG_DEBUG("ignored screen \"%s\" offer of clipboard %d (not the owner)",
+                  getName(client).c_str(), info.id);
+        return;
+    }
+    onClipboardOffered(client, info);
+}
+
+void Server::handle_clipboard_data_requested(const Event& event, BaseClientProxy* client)
+{
+    // ignore events from unknown clients
+    if (m_clientSet.count(client) == 0) {
+        return;
+    }
+    const auto& info = event.get_data_as<ClipboardOfferInfo>();
+    if (info.id >= kClipboardEnd) {
+        return;
+    }
+
+    if (!m_enableClipboard || (m_maximumClipboardSize == 0)) {
+        client->provideClipboardUnavailable(info.id, info.offer);
+        return;
+    }
+    onClipboardDataRequested(client, info.id, info.offer);
+}
+
+void Server::handle_clipboard_data_unavailable(const Event& event, BaseClientProxy* client)
+{
+    // ignore events from unknown clients
+    if (m_clientSet.count(client) == 0) {
+        return;
+    }
+    const auto& info = event.get_data_as<ClipboardOfferInfo>();
+    if (info.id >= kClipboardEnd) {
+        return;
+    }
+
+    ClipboardInfo& clipboard = m_clipboards[info.id];
+    if (clipboard.m_clipboardOwner != getName(client) ||
+        clipboard.m_clipboardOffer.hash != info.offer.hash) {
+        return;
+    }
+
+    LOG_DEBUG("screen \"%s\" cannot provide clipboard %d", getName(client).c_str(), info.id);
+    clipboard.m_requestedFromOwner = false;
+    failClipboardRequests(info.id);
 }
 
 void Server::handle_key_down_event(const Event& event)
@@ -1481,6 +1549,7 @@ void Server::onClipboardChanged(BaseClientProxy* sender, ClipboardID id, std::ui
 	if (data->size() > m_maximumClipboardSize) {
 		LOG_NOTE("not updating clipboard because its size %zu exceeds the limit of %zu bytes configured by the server",
 			data->size(), m_maximumClipboardSize);
+		failClipboardRequests(id);
 		return;
 	}
 	if (same_clipboard_contents(data, clipboard.m_clipboardData)) {
@@ -1490,16 +1559,200 @@ void Server::onClipboardChanged(BaseClientProxy* sender, ClipboardID id, std::ui
 
 	// got new data
 	LOG_INFO("screen \"%s\" updated clipboard %d", clipboard.m_clipboardOwner.c_str(), id);
+	bool wasOffered = clipboard.m_clipboardOffer.describes(*data);
 	clipboard.m_clipboardData = data;
+	clipboard.m_requestedFromOwner = false;
 
-	// tell all clients except the sender that the clipboard is dirty
-    for (auto index = m_clients.begin(); index != m_clients.end(); ++index) {
-		BaseClientProxy* client = index->second;
-		client->setClipboardDirty(id, client != sender);
+	if (!wasOffered) {
+		// pastes waiting for previously offered contents won't get them
+		failClipboardRequests(id);
+		clipboard.m_clipboardOffer = ClipboardOffer::describe(*data);
+
+		// tell all clients except the sender that the clipboard is dirty.  if the contents had
+		// been offered, the clients were told then.
+		for (auto index = m_clients.begin(); index != m_clients.end(); ++index) {
+			BaseClientProxy* client = index->second;
+			client->setClipboardDirty(id, client != sender);
+		}
 	}
+
+	// complete the pastes that were waiting for these contents
+	serveClipboardRequests(id);
 
 	// send the new clipboard to the active screen
 	m_active->setClipboardData(id, clipboard.m_clipboardData);
+}
+
+void Server::onClipboardOffered(BaseClientProxy* sender, const ClipboardOfferInfo& info)
+{
+    ClipboardID id = info.id;
+    ClipboardInfo& clipboard = m_clipboards[id];
+
+    // ignore offer if sequence number is old
+    if (info.sequence < clipboard.m_clipboardSeqNum) {
+        LOG_INFO("ignored screen \"%s\" offer of clipboard %d (missequenced)",
+                 getName(sender).c_str(), id);
+        return;
+    }
+
+    if (info.offer.size > m_maximumClipboardSize) {
+        LOG_NOTE("not updating clipboard because its size %u exceeds the limit of %zu bytes "
+                 "configured by the server", info.offer.size, m_maximumClipboardSize);
+        return;
+    }
+
+    bool unchanged = clipboard.m_clipboardData
+            ? info.offer.describes(*clipboard.m_clipboardData)
+            : clipboard.m_clipboardOffer == info.offer;
+    if (unchanged) {
+        LOG_DEBUG("ignored screen \"%s\" offer of clipboard %d (unchanged)",
+                  getName(sender).c_str(), id);
+        return;
+    }
+
+    LOG_INFO("screen \"%s\" updated clipboard %d", getName(sender).c_str(), id);
+
+    // pastes waiting for the previous contents won't get them
+    failClipboardRequests(id);
+
+    clipboard.m_clipboardOffer = info.offer;
+    clipboard.m_requestedFromOwner = false;
+
+    // the contents may be known already, e.g. because the other clipboard holds them
+    clipboard.m_clipboardData = findClipboardData(info.offer.hash);
+    if (clipboard.m_clipboardData && !info.offer.describes(*clipboard.m_clipboardData)) {
+        clipboard.m_clipboardData.reset();
+    }
+
+    // tell all clients except the sender that the clipboard is dirty
+    for (auto index = m_clients.begin(); index != m_clients.end(); ++index) {
+        BaseClientProxy* client = index->second;
+        client->setClipboardDirty(id, client != sender);
+    }
+
+    // small contents are fetched right away, so that pasting them anywhere is quick, unless
+    // the owner sends them anyway
+    if (!clipboard.m_clipboardData && (info.flags & kClipboardOfferDataFollows) == 0 &&
+        info.offer.size <= kClipboardEagerSize) {
+        fetchClipboard(id);
+    }
+
+    sendClipboard(m_active, id);
+}
+
+void Server::onClipboardDataRequested(BaseClientProxy* requester, ClipboardID id,
+                                      const ClipboardOffer& offer)
+{
+    ClipboardInfo& clipboard = m_clipboards[id];
+
+    if (clipboard.m_clipboardOffer.hash != offer.hash) {
+        // the clipboard has changed since the contents were offered, but they may be known
+        if (auto data = findClipboardData(offer.hash)) {
+            requester->provideClipboardData(id, data);
+            return;
+        }
+        LOG_DEBUG("clipboard %d requested by \"%s\" has changed", id, getName(requester).c_str());
+        requester->provideClipboardUnavailable(id, offer);
+        return;
+    }
+
+    if (clipboard.m_clipboardData) {
+        requester->provideClipboardData(id, clipboard.m_clipboardData);
+        return;
+    }
+
+    // the owner has only offered the contents, so they have to be fetched first
+    if (std::find(clipboard.m_waiting.begin(), clipboard.m_waiting.end(), requester) ==
+            clipboard.m_waiting.end()) {
+        clipboard.m_waiting.push_back(requester);
+    }
+    fetchClipboard(id);
+}
+
+void Server::sendClipboard(BaseClientProxy* screen, ClipboardID id)
+{
+    const ClipboardInfo& clipboard = m_clipboards[id];
+    if (clipboard.m_clipboardOffer.size > m_maximumClipboardSize) {
+        return;
+    }
+
+    if (clipboard.m_clipboardData) {
+        // the client proxy sends the data in the background so that it does not delay the
+        // input that follows
+        screen->setClipboardData(id, clipboard.m_clipboardData);
+        return;
+    }
+
+    if (screen->supportsClipboardOffers()) {
+        // the screen asks for the data when it needs it
+        screen->setClipboardOffer(id, clipboard.m_clipboardOffer);
+    } else {
+        // the screen needs the data itself.  it is sent once it arrives from the owner.
+        fetchClipboard(id);
+    }
+}
+
+void Server::fetchClipboard(ClipboardID id)
+{
+    ClipboardInfo& clipboard = m_clipboards[id];
+    if (clipboard.m_clipboardData || clipboard.m_requestedFromOwner) {
+        return;
+    }
+
+    auto index = m_clients.find(clipboard.m_clipboardOwner);
+    if (index == m_clients.end()) {
+        return;
+    }
+
+    // owners that cannot be asked send the contents when the cursor leaves them
+    BaseClientProxy* owner = index->second;
+    if (owner == m_primaryClient || !owner->supportsClipboardOffers()) {
+        return;
+    }
+
+    LOG_DEBUG("fetching clipboard %d from \"%s\"", id, clipboard.m_clipboardOwner.c_str());
+    clipboard.m_requestedFromOwner = true;
+    owner->requestClipboardData(id, clipboard.m_clipboardOffer);
+}
+
+void Server::serveClipboardRequests(ClipboardID id)
+{
+    ClipboardInfo& clipboard = m_clipboards[id];
+    if (!clipboard.m_clipboardData) {
+        return;
+    }
+
+    std::vector<BaseClientProxy*> waiting;
+    waiting.swap(clipboard.m_waiting);
+    for (BaseClientProxy* screen : waiting) {
+        if (m_clientSet.count(screen) != 0) {
+            screen->provideClipboardData(id, clipboard.m_clipboardData);
+        }
+    }
+}
+
+void Server::failClipboardRequests(ClipboardID id)
+{
+    ClipboardInfo& clipboard = m_clipboards[id];
+
+    std::vector<BaseClientProxy*> waiting;
+    waiting.swap(clipboard.m_waiting);
+    for (BaseClientProxy* screen : waiting) {
+        if (m_clientSet.count(screen) != 0) {
+            screen->provideClipboardUnavailable(id, clipboard.m_clipboardOffer);
+        }
+    }
+}
+
+MarshalledClipboardPtr Server::findClipboardData(std::uint64_t hash) const
+{
+    for (ClipboardID id = 0; id < kClipboardEnd; ++id) {
+        const auto& data = m_clipboards[id].m_clipboardData;
+        if (data && data->hash() == hash) {
+            return data;
+        }
+    }
+    return nullptr;
 }
 
 void
@@ -2029,6 +2282,16 @@ Server::addClient(BaseClientProxy* client)
                           [this, client](const auto& e){ handle_clipboard_grabbed(e, client); });
     m_events->add_handler(EventType::CLIPBOARD_CHANGED, client->get_event_target(),
                           [this, client](const auto& e){ handle_clipboard_changed(e, client); });
+    m_events->add_handler(EventType::CLIPBOARD_OFFERED, client->get_event_target(),
+                          [this, client](const auto& e){ handle_clipboard_offered(e, client); });
+    m_events->add_handler(EventType::CLIPBOARD_DATA_REQUESTED, client->get_event_target(),
+                          [this, client](const auto& e){
+                              handle_clipboard_data_requested(e, client);
+                          });
+    m_events->add_handler(EventType::CLIPBOARD_DATA_UNAVAILABLE, client->get_event_target(),
+                          [this, client](const auto& e){
+                              handle_clipboard_data_unavailable(e, client);
+                          });
 
 	// add to list
 	m_clientSet.insert(client);
@@ -2058,10 +2321,24 @@ Server::removeClient(BaseClientProxy* client)
     m_events->remove_handler(EventType::SCREEN_SHAPE_CHANGED, client->get_event_target());
     m_events->remove_handler(EventType::CLIPBOARD_GRABBED, client->get_event_target());
     m_events->remove_handler(EventType::CLIPBOARD_CHANGED, client->get_event_target());
+    m_events->remove_handler(EventType::CLIPBOARD_OFFERED, client->get_event_target());
+    m_events->remove_handler(EventType::CLIPBOARD_DATA_REQUESTED, client->get_event_target());
+    m_events->remove_handler(EventType::CLIPBOARD_DATA_UNAVAILABLE, client->get_event_target());
 
 	// remove from list
 	m_clients.erase(getName(client));
 	m_clientSet.erase(i);
+
+    // the client won't answer or need clipboard requests anymore
+    for (ClipboardID id = 0; id < kClipboardEnd; ++id) {
+        ClipboardInfo& clipboard = m_clipboards[id];
+        auto& waiting = clipboard.m_waiting;
+        waiting.erase(std::remove(waiting.begin(), waiting.end(), client), waiting.end());
+        if (clipboard.m_clipboardOwner == getName(client) && !clipboard.m_clipboardData) {
+            clipboard.m_requestedFromOwner = false;
+            failClipboardRequests(id);
+        }
+    }
 
 	return true;
 }
@@ -2205,8 +2482,10 @@ Server::forceLeaveClient(BaseClientProxy* client)
 
 Server::ClipboardInfo::ClipboardInfo() :
 	m_clipboardData(empty_marshalled_clipboard()),
+	m_clipboardOffer(ClipboardOffer::describe(*m_clipboardData)),
 	m_clipboardOwner(),
-	m_clipboardSeqNum(0)
+	m_clipboardSeqNum(0),
+	m_requestedFromOwner(false)
 {
 	// do nothing
 }
