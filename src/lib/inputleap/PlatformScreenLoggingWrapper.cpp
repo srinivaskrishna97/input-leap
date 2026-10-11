@@ -61,6 +61,28 @@ bool PlatformScreenLoggingWrapper::setClipboard(ClipboardID id, const IClipboard
     return result;
 }
 
+bool PlatformScreenLoggingWrapper::setClipboardData(ClipboardID id,
+                                                   const MarshalledClipboardPtr& data)
+{
+    bool result = screen_->setClipboardData(id, data);
+    LOG_DEBUG1("PlatformScreen::setClipboardData() id=%d size=%zu => %d",
+               id, data ? data->size() : 0, result);
+    return result;
+}
+
+bool PlatformScreenLoggingWrapper::hasClipboardSnapshots() const
+{
+    return screen_->hasClipboardSnapshots();
+}
+
+MarshalledClipboardPtr PlatformScreenLoggingWrapper::getClipboardSnapshot(ClipboardID id) const
+{
+    auto result = screen_->getClipboardSnapshot(id);
+    LOG_DEBUG1("PlatformScreen::getClipboardSnapshot() id=%d => %s", id,
+               result ? "ready" : "pending");
+    return result;
+}
+
 void PlatformScreenLoggingWrapper::checkClipboards()
 {
     LOG_DEBUG1("PlatformScreen::checkClipboards()");

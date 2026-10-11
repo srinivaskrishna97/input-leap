@@ -161,6 +161,11 @@ Screen::setClipboard(ClipboardID id, const IClipboard* clipboard)
     m_screen->setClipboard(id, clipboard);
 }
 
+void Screen::setClipboardData(ClipboardID id, const MarshalledClipboardPtr& data)
+{
+    m_screen->setClipboardData(id, data);
+}
+
 void
 Screen::grabClipboard(ClipboardID id)
 {
@@ -460,6 +465,16 @@ bool
 Screen::getClipboard(ClipboardID id, IClipboard* clipboard) const
 {
     return m_screen->getClipboard(id, clipboard);
+}
+
+bool Screen::hasClipboardSnapshots() const
+{
+    return m_screen->hasClipboardSnapshots();
+}
+
+MarshalledClipboardPtr Screen::getClipboardSnapshot(ClipboardID id) const
+{
+    return m_screen->getClipboardSnapshot(id);
 }
 
 void Screen::getShape(std::int32_t& x, std::int32_t& y, std::int32_t& w, std::int32_t& h) const

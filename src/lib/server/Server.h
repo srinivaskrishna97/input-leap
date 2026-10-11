@@ -21,6 +21,7 @@
 #include "server/Config.h"
 #include "inputleap/clipboard_types.h"
 #include "inputleap/Clipboard.h"
+#include "inputleap/ClipboardData.h"
 #include "inputleap/key_types.h"
 #include "inputleap/mouse_types.h"
 #include "inputleap/Fwd.h"
@@ -379,8 +380,8 @@ private:
         ClipboardInfo();
 
     public:
-        Clipboard m_clipboard;
-        std::string m_clipboardData;
+        // the contents in the marshalled form, never null
+        MarshalledClipboardPtr m_clipboardData;
         std::string m_clipboardOwner;
         std::uint32_t m_clipboardSeqNum;
     };

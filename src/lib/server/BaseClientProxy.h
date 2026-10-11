@@ -21,6 +21,7 @@
 #include "base/EventTarget.h"
 #include "inputleap/Fwd.h"
 #include "inputleap/IClient.h"
+#include "inputleap/ClipboardData.h"
 
 namespace inputleap {
 
@@ -60,6 +61,26 @@ public:
     Return if this proxy is for client or primary.
     */
     virtual bool isPrimary() const { return false; }
+
+    //! Get clipboard contents in the marshalled form
+    /*!
+    Returns nullptr if the contents are not available yet. In that case a
+    \c CLIPBOARD_CHANGED event is sent once they are. The default implementation reads the
+    clipboard using getClipboard().
+    */
+    virtual MarshalledClipboardPtr getClipboardData(ClipboardID id) const;
+
+    //@}
+
+    //! @name manipulators
+    //@{
+
+    //! Set clipboard contents in the marshalled form
+    /*!
+    Like setClipboard() but avoids copying the data. The default implementation converts the
+    data and calls setClipboard().
+    */
+    virtual void setClipboardData(ClipboardID id, const MarshalledClipboardPtr& data);
 
     //@}
 

@@ -1,0 +1,1 @@
+Fixed the mouse cursor freezing and then jumping when moving to another screen while the clipboard holds large contents such as a screenshot. Clipboard contents are now prepared in the background when they change and are sent without delaying mouse and keyboard input.

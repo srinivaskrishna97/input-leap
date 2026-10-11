@@ -25,6 +25,7 @@
 #include "inputleap/DragInformation.h"
 #include "platform/synwinhk.h"
 #include <map>
+#include <memory>
 #include <string>
 
 #define WIN32_LEAN_AND_MEAN
@@ -35,6 +36,7 @@ namespace inputleap {
 class MSWindowsDesks;
 class MSWindowsKeyState;
 class MSWindowsScreenSaver;
+class MSWindowsClipboardWorker;
 class Thread;
 class MSWindowsDropTarget;
 
@@ -111,6 +113,9 @@ public:
     virtual bool canLeave();
     virtual void leave();
     virtual bool setClipboard(ClipboardID, const IClipboard*);
+    bool setClipboardData(ClipboardID id, const MarshalledClipboardPtr& data) override;
+    bool hasClipboardSnapshots() const override;
+    MarshalledClipboardPtr getClipboardSnapshot(ClipboardID id) const override;
     virtual void checkClipboards();
     virtual void openScreensaver(bool notify);
     virtual void closeScreensaver();
@@ -187,6 +192,9 @@ private: // HACK
 
     // fix timer callback
     void handle_fixes();
+
+    // the clipboard worker has captured the clipboard
+    void handle_clipboard_captured();
 
     // fix the clipboard viewer chain
     void fixClipboardViewer();
@@ -295,6 +303,9 @@ private:
     HWND m_window;
     HWND m_nextClipboardWindow;
     bool m_ownClipboard;
+
+    // reads and writes the clipboard in the background
+    std::unique_ptr<MSWindowsClipboardWorker> m_clipboardWorker;
 
     // one desk per desktop and a cond var to communicate with it
     MSWindowsDesks* m_desks;

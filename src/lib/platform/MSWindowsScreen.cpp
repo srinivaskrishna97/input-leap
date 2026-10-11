@@ -22,6 +22,7 @@
 #include "platform/MSWindowsDropTarget.h"
 #include "client/Client.h"
 #include "platform/MSWindowsClipboard.h"
+#include "platform/MSWindowsClipboardWorker.h"
 #include "platform/MSWindowsDesks.h"
 #include "platform/MSWindowsEventQueueBuffer.h"
 #include "platform/MSWindowsKeyState.h"
@@ -137,6 +138,7 @@ MSWindowsScreen::MSWindowsScreen(
         updateScreenShape();
         m_class       = createWindowClass();
         m_window      = createWindow(m_class, "InputLeap");
+        m_clipboardWorker = std::make_unique<MSWindowsClipboardWorker>(m_events);
         forceShowCursor();
         LOG_DEBUG("screen shape: %d,%d %dx%d %s", m_x, m_y, m_w, m_h, m_multimon ? "(multi-monitor)" : "");
         LOG_DEBUG("window is 0x%08x", m_window);
@@ -147,6 +149,7 @@ MSWindowsScreen::MSWindowsScreen(
         RegisterDragDrop(m_dropWindow, m_dropTarget);
     }
     catch (...) {
+        m_clipboardWorker.reset();
         delete m_keyState;
         delete m_desks;
         delete m_screensaver;
@@ -159,6 +162,8 @@ MSWindowsScreen::MSWindowsScreen(
     // install event handlers
     m_events->add_handler(EventType::SYSTEM, m_events->getSystemTarget(),
                           [this](const auto& e){ handle_system_event(e); });
+    m_events->add_handler(EventType::CLIPBOARD_CAPTURED, m_clipboardWorker->event_target(),
+                          [this](const auto& e){ handle_clipboard_captured(); });
 
     // install the platform event queue
     m_events->set_buffer(std::make_unique<MSWindowsEventQueueBuffer>(m_events));
@@ -169,6 +174,11 @@ MSWindowsScreen::~MSWindowsScreen()
     assert(s_screen != nullptr);
 
     disable();
+
+    // stop the clipboard worker before the event queue buffer goes away
+    m_events->remove_handler(EventType::CLIPBOARD_CAPTURED, m_clipboardWorker->event_target());
+    m_clipboardWorker.reset();
+
     m_events->set_buffer(nullptr);
     m_events->remove_handler(EventType::SYSTEM, m_events->getSystemTarget());
     delete m_keyState;
@@ -212,6 +222,9 @@ MSWindowsScreen::enable()
 
     // install our clipboard snooper
     m_nextClipboardWindow = SetClipboardViewer(m_window);
+
+    // capture the current clipboard so that it is ready when it needs to be sent
+    m_clipboardWorker->poll();
 
     // track the active desk and (re)install the hooks
     m_desks->enable();
@@ -384,6 +397,20 @@ void MSWindowsScreen::send_drag_thread()
 bool
 MSWindowsScreen::setClipboard(ClipboardID, const IClipboard* src)
 {
+    // The clipboard is normally written by the worker thread, so that converting large
+    // contents does not block input handling, and so that all updates are applied in order.
+    if (m_clipboardWorker->is_running()) {
+        if (src != nullptr) {
+            // save clipboard data
+            m_clipboardWorker->apply(marshall_clipboard(*src));
+        }
+        else {
+            // assert clipboard ownership
+            m_clipboardWorker->clear();
+        }
+        return true;
+    }
+
     MSWindowsClipboard dst(m_window);
     if (src != nullptr) {
         // save clipboard data
@@ -398,6 +425,38 @@ MSWindowsScreen::setClipboard(ClipboardID, const IClipboard* src)
         dst.close();
         return true;
     }
+}
+
+bool MSWindowsScreen::setClipboardData(ClipboardID id, const MarshalledClipboardPtr& data)
+{
+    if (m_clipboardWorker->is_running()) {
+        m_clipboardWorker->apply(data);
+        return true;
+    }
+    return PlatformScreen::setClipboardData(id, data);
+}
+
+bool MSWindowsScreen::hasClipboardSnapshots() const
+{
+    // without the worker the clipboard is read on demand
+    return m_clipboardWorker->is_running();
+}
+
+MarshalledClipboardPtr MSWindowsScreen::getClipboardSnapshot(ClipboardID) const
+{
+    // Windows has a single clipboard that serves all InputLeap clipboards
+    auto snapshot = m_clipboardWorker->current_snapshot();
+    if (!snapshot) {
+        // make sure that a capture is underway.  CLIPBOARD_CHANGED is sent once it completes.
+        m_clipboardWorker->poll();
+    }
+    return snapshot;
+}
+
+void MSWindowsScreen::handle_clipboard_captured()
+{
+    sendClipboardEvent(EventType::CLIPBOARD_CHANGED, kClipboardClipboard);
+    sendClipboardEvent(EventType::CLIPBOARD_CHANGED, kClipboardSelection);
 }
 
 void
@@ -420,6 +479,9 @@ MSWindowsScreen::checkClipboards()
         sendClipboardEvent(EventType::CLIPBOARD_GRABBED, kClipboardClipboard);
         sendClipboardEvent(EventType::CLIPBOARD_GRABBED, kClipboardSelection);
     }
+
+    // likewise make sure that a changed clipboard gets captured
+    m_clipboardWorker->poll();
 }
 
 void
@@ -1450,6 +1512,10 @@ MSWindowsScreen::onClipboardChange()
     // now notify client that somebody changed the clipboard (unless
     // we're the owner).
     if (!MSWindowsClipboard::is_owned_by_us()) {
+        // capture the new contents in the background so that they are ready when they need
+        // to be sent to another screen
+        m_clipboardWorker->request_capture();
+
         if (m_ownClipboard) {
             LOG_DEBUG("clipboard changed: lost ownership");
             m_ownClipboard = false;
@@ -1558,6 +1624,9 @@ void MSWindowsScreen::handle_fixes()
 {
     // fix clipboard chain
     fixClipboardViewer();
+
+    // capture the clipboard if a change notification was missed
+    m_clipboardWorker->poll();
 
     // update keys if keyboard layouts have changed
     if (m_keyState->didGroupsChange()) {

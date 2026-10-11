@@ -33,6 +33,9 @@ public:
     bool canLeave() override;
     void leave() override;
     bool setClipboard(ClipboardID id, const IClipboard* clipboard) override;
+    bool setClipboardData(ClipboardID id, const MarshalledClipboardPtr& data) override;
+    bool hasClipboardSnapshots() const override;
+    MarshalledClipboardPtr getClipboardSnapshot(ClipboardID id) const override;
     void checkClipboards() override;
     void openScreensaver(bool notify) override;
     void closeScreensaver() override;

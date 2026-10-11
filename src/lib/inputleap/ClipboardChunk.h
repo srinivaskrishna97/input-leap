@@ -35,18 +35,18 @@ public:
     static ClipboardChunk data(ClipboardID id, std::uint32_t sequence, const std::string& data);
     static ClipboardChunk end(ClipboardID id, std::uint32_t sequence);
 
-    static int assemble(inputleap::IStream* stream, std::string& dataCached, ClipboardID& id,
-                        std::uint32_t& sequence);
-
-    static size_t getExpectedSize() { return s_expectedSize; }
+    /*! Reads one clipboard chunk message from \p stream and appends it to \p dataCached.
+        \p expectedSize holds the size announced by the start chunk. Both \p dataCached and
+        \p expectedSize must be kept per connection between calls. A start chunk discards any
+        partially received data, which allows a sender to abort a transfer by starting a new one.
+    */
+    static int assemble(inputleap::IStream* stream, std::string& dataCached,
+                        std::size_t& expectedSize, ClipboardID& id, std::uint32_t& sequence);
 
     std::uint8_t id_ = 0;
     std::uint32_t sequence_ = 0;
     std::uint8_t mark_ = 0;
     std::string data_;
-
-private:
-    static size_t        s_expectedSize;
 };
 
 } // namespace inputleap

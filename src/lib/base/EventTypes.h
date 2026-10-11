@@ -271,8 +271,10 @@ enum class EventType : std::uint32_t {
     */
     CLIPBOARD_CHANGED,
 
-    /// This event is sent whenever a clipboard chunk is transferred.
-    CLIPBOARD_SENDING,
+    /** Sent by a platform clipboard worker thread when it has finished capturing the system
+        clipboard in the background. Used internally by platform screens.
+    */
+    CLIPBOARD_CAPTURED,
 
     /// This event is sent whenever a file chunk is transferred.
     FILE_CHUNK_SENDING,

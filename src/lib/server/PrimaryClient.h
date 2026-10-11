@@ -132,6 +132,11 @@ public:
     void setClipboard(ClipboardID, const IClipboard*) override;
     void grabClipboard(ClipboardID) override;
     void setClipboardDirty(ClipboardID, bool) override;
+
+    // BaseClientProxy overrides
+    MarshalledClipboardPtr getClipboardData(ClipboardID id) const override;
+    void setClipboardData(ClipboardID id, const MarshalledClipboardPtr& data) override;
+
     void keyDown(KeyID, KeyModifierMask, KeyButton) override;
     void keyRepeat(KeyID, KeyModifierMask, std::int32_t count, KeyButton) override;
     void keyUp(KeyID, KeyModifierMask, KeyButton) override;

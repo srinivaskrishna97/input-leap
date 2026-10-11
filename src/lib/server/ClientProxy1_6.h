@@ -21,12 +21,16 @@
 #include "server/ClientProxy.h"
 #include "base/Fwd.h"
 #include "inputleap/Clipboard.h"
+#include "inputleap/ClipboardData.h"
 #include "inputleap/protocol_types.h"
+
+#include <memory>
 
 namespace inputleap {
 
 class Server;
 class IStream;
+class ClipboardStreamer;
 
 //! Proxy for client implementing protocol version 1.0
 class ClientProxy1_6 : public ClientProxy {
@@ -66,6 +70,10 @@ public:
     void sendDragInfo(std::uint32_t fileCount, const char* info, size_t size) override;
     void file_chunk_sending(const FileChunk& chunk) override;
 
+    // BaseClientProxy overrides
+    MarshalledClipboardPtr getClipboardData(ClipboardID id) const override;
+    void setClipboardData(ClipboardID id, const MarshalledClipboardPtr& data) override;
+
 protected:
     virtual bool parseHandshakeMessage(const std::uint8_t* code);
     virtual bool parseMessage(const std::uint8_t* code);
@@ -89,7 +97,6 @@ private:
     void handle_disconnect();
     void handle_write_error();
     void handle_flatline();
-    void handle_clipboard_sending_event(const Event& event);
 
     bool recvInfo();
     bool recvGrabClipboard();
@@ -100,12 +107,19 @@ protected:
         ClientClipboard();
 
     public:
-        Clipboard m_clipboard;
+        MarshalledClipboardPtr m_data;
         std::uint32_t m_sequenceNumber;
         bool m_dirty;
     };
 
     ClientClipboard m_clipboard[kClipboardEnd];
+
+    // sends clipboard contents without delaying input messages
+    std::unique_ptr<ClipboardStreamer> m_clipboardStreamer;
+
+    // clipboard data being received from the client
+    std::string m_clipboardRecvData;
+    std::size_t m_clipboardRecvExpectedSize = 0;
 
 protected:
     typedef bool (ClientProxy1_6::*MessageParser)(const std::uint8_t*);

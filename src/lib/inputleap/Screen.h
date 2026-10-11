@@ -99,6 +99,13 @@ public:
     */
     void setClipboard(ClipboardID, const IClipboard*);
 
+    //! Set clipboard from marshalled data
+    /*!
+    Like setClipboard() but takes the contents in the marshalled form. The platform screen
+    may apply them asynchronously.
+    */
+    void setClipboardData(ClipboardID, const MarshalledClipboardPtr& data);
+
     //! Grab clipboard
     /*!
     Grabs (i.e. take ownership of) the system clipboard.
@@ -296,6 +303,19 @@ public:
     // IScreen overrides
     const EventTarget* get_event_target() const override;
     bool getClipboard(ClipboardID id, IClipboard*) const override;
+
+    //! Test if the screen prepares clipboard snapshots
+    /*!
+    See IPlatformScreen::hasClipboardSnapshots().
+    */
+    bool hasClipboardSnapshots() const;
+
+    //! Get the prepared clipboard contents
+    /*!
+    See IPlatformScreen::getClipboardSnapshot().
+    */
+    MarshalledClipboardPtr getClipboardSnapshot(ClipboardID id) const;
+
     void getShape(std::int32_t& x, std::int32_t& y, std::int32_t& width,
                   std::int32_t& height) const override;
     void getCursorPos(std::int32_t& x, std::int32_t& y) const override;

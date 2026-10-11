@@ -110,11 +110,7 @@ Server::Server(
 		ClipboardInfo& clipboard   = m_clipboards[id];
 		clipboard.m_clipboardOwner  = primaryName;
 		clipboard.m_clipboardSeqNum = m_seqNum;
-		if (clipboard.m_clipboard.open(0)) {
-			clipboard.m_clipboard.clear();
-			clipboard.m_clipboard.close();
-		}
-		clipboard.m_clipboardData   = clipboard.m_clipboard.marshall();
+		clipboard.m_clipboardData   = empty_marshalled_clipboard();
 	}
 
     // install event handlers
@@ -459,11 +455,13 @@ void Server::switchScreen(BaseClientProxy* dst, std::int32_t x, std::int32_t y, 
 		if (m_enableClipboard) {
 			// send the clipboard data to new active screen
 			for (ClipboardID id = 0; id < kClipboardEnd; ++id) {
-				// Hackity hackity hack
-				if (m_clipboards[id].m_clipboard.marshall().size() > m_maximumClipboardSize) {
+				const auto& data = m_clipboards[id].m_clipboardData;
+				if (data->size() > m_maximumClipboardSize) {
 					continue;
 				}
-				m_active->setClipboard(id, &m_clipboards[id].m_clipboard);
+				// the client proxy sends the data in the background so that it does
+				// not delay the input that follows
+				m_active->setClipboardData(id, data);
 			}
 		}
 
@@ -1198,11 +1196,7 @@ void Server::handle_clipboard_grabbed(const Event& event, BaseClientProxy* grabb
     clipboard.m_clipboardSeqNum = info.m_sequenceNumber;
 
 	// clear the clipboard data (since it's not known at this point)
-	if (clipboard.m_clipboard.open(0)) {
-		clipboard.m_clipboard.clear();
-		clipboard.m_clipboard.close();
-	}
-	clipboard.m_clipboardData = clipboard.m_clipboard.marshall();
+	clipboard.m_clipboardData = empty_marshalled_clipboard();
 
 	// tell all other screens to take ownership of clipboard.  tell the
 	// grabber that it's clipboard isn't dirty.
@@ -1224,6 +1218,17 @@ void Server::handle_clipboard_changed(const Event& event, BaseClientProxy* clien
 		return;
 	}
     const auto& info = event.get_data_as<IScreen::ClipboardInfo>();
+    if (info.m_id >= kClipboardEnd) {
+        return;
+    }
+
+    // a screen may report changed contents after another screen has grabbed the clipboard,
+    // e.g. when a clipboard capture completes in the background
+    if (m_clipboards[info.m_id].m_clipboardOwner != getName(client)) {
+        LOG_DEBUG("ignored screen \"%s\" update of clipboard %d (not the owner)",
+                  getName(client).c_str(), info.m_id);
+        return;
+    }
     onClipboardChanged(client, info.m_id, info.m_sequenceNumber);
 }
 
@@ -1463,21 +1468,22 @@ void Server::onClipboardChanged(BaseClientProxy* sender, ClipboardID id, std::ui
 	// should be the expected client
 	assert(sender == m_clients.find(clipboard.m_clipboardOwner)->second);
 
-	// get data
-	if (!sender->getClipboard(id, &clipboard.m_clipboard)) {
-		LOG_DEBUG("ignored screen \"%s\" update of clipboard %d (failed to get clipboard)",
+	// get data.  screens that capture the clipboard in the background return nothing while
+	// the capture is in progress and send a CLIPBOARD_CHANGED event once it completes.
+	MarshalledClipboardPtr data = sender->getClipboardData(id);
+	if (!data) {
+		LOG_DEBUG("screen \"%s\" clipboard %d is not available yet",
 				clipboard.m_clipboardOwner.c_str(), id);
 		return;
 	}
 
 	// ignore if data hasn't changed
-    std::string data = clipboard.m_clipboard.marshall();
-	if (data.size() > m_maximumClipboardSize) {
-		LOG_NOTE("not updating clipboard because it's over the size limit (%zi KB) configured by the server",
-			m_maximumClipboardSize);
+	if (data->size() > m_maximumClipboardSize) {
+		LOG_NOTE("not updating clipboard because its size %zu exceeds the limit of %zu bytes configured by the server",
+			data->size(), m_maximumClipboardSize);
 		return;
 	}
-	if (data == clipboard.m_clipboardData) {
+	if (same_clipboard_contents(data, clipboard.m_clipboardData)) {
 		LOG_DEBUG("ignored screen \"%s\" update of clipboard %d (unchanged)", clipboard.m_clipboardOwner.c_str(), id);
 		return;
 	}
@@ -1493,7 +1499,7 @@ void Server::onClipboardChanged(BaseClientProxy* sender, ClipboardID id, std::ui
 	}
 
 	// send the new clipboard to the active screen
-	m_active->setClipboard(id, &clipboard.m_clipboard);
+	m_active->setClipboardData(id, clipboard.m_clipboardData);
 }
 
 void
@@ -2198,8 +2204,7 @@ Server::forceLeaveClient(BaseClientProxy* client)
 //
 
 Server::ClipboardInfo::ClipboardInfo() :
-	m_clipboard(),
-	m_clipboardData(),
+	m_clipboardData(empty_marshalled_clipboard()),
 	m_clipboardOwner(),
 	m_clipboardSeqNum(0)
 {

@@ -23,6 +23,7 @@
 #include "inputleap/Fwd.h"
 #include "inputleap/IClient.h"
 #include "inputleap/Clipboard.h"
+#include "inputleap/ClipboardData.h"
 #include "inputleap/DragInformation.h"
 #include "inputleap/INode.h"
 #include "inputleap/ClientArgs.h"
@@ -140,6 +141,10 @@ public:
                bool forScreensaver) override;
     bool leave() override;
     void setClipboard(ClipboardID, const IClipboard*) override;
+
+    //! Set the clipboard from marshalled data received from the server
+    void setClipboardData(ClipboardID, const MarshalledClipboardPtr& data);
+
     void grabClipboard(ClipboardID) override;
     void setClipboardDirty(ClipboardID, bool) override;
     void keyDown(KeyID, KeyModifierMask, KeyButton) override;
@@ -178,6 +183,7 @@ private:
     void handle_disconnected();
     void handle_shape_changed();
     void handle_clipboard_grabbed(const Event& event);
+    void handle_clipboard_changed(const Event& event);
     void handle_hello();
     void handle_suspend();
     void handle_resume();
@@ -205,7 +211,7 @@ private:
     bool m_ownClipboard[kClipboardEnd];
     bool m_sentClipboard[kClipboardEnd];
     IClipboard::Time m_timeClipboard[kClipboardEnd];
-    std::string m_dataClipboard[kClipboardEnd];
+    MarshalledClipboardPtr m_dataClipboard[kClipboardEnd];
     IEventQueue* m_events;
     std::size_t m_expectedFileSize;
     std::string m_receivedFileData;

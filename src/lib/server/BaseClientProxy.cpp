@@ -17,6 +17,7 @@
  */
 
 #include "server/BaseClientProxy.h"
+#include "inputleap/Clipboard.h"
 
 namespace inputleap {
 
@@ -48,6 +49,23 @@ void BaseClientProxy::getJumpCursorPos(std::int32_t& x, std::int32_t& y) const
 std::string BaseClientProxy::getName() const
 {
     return m_name;
+}
+
+MarshalledClipboardPtr BaseClientProxy::getClipboardData(ClipboardID id) const
+{
+    Clipboard clipboard;
+    if (!getClipboard(id, &clipboard)) {
+        return nullptr;
+    }
+    return marshall_clipboard(clipboard);
+}
+
+void BaseClientProxy::setClipboardData(ClipboardID id, const MarshalledClipboardPtr& data)
+{
+    const auto& contents = data ? data : empty_marshalled_clipboard();
+    Clipboard clipboard;
+    clipboard.unmarshall(contents->data(), 0);
+    setClipboard(id, &clipboard);
 }
 
 } // namespace inputleap

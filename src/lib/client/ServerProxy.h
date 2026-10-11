@@ -19,16 +19,21 @@
 #pragma once
 
 #include "inputleap/clipboard_types.h"
+#include "inputleap/ClipboardData.h"
 #include "inputleap/key_types.h"
 #include "inputleap/Fwd.h"
 #include "base/Fwd.h"
 #include "base/Event.h"
 #include "base/EventTarget.h"
 
+#include <memory>
+#include <string>
+
 namespace inputleap {
 
 class Client;
 class ClientInfo;
+class ClipboardStreamer;
 class IStream;
 
 //! Proxy for server
@@ -51,6 +56,12 @@ public:
     void onInfoChanged();
     bool onGrabClipboard(ClipboardID);
     void onClipboardChanged(ClipboardID, const IClipboard*);
+
+    //! Send clipboard contents to the server
+    /*!
+    The data is sent in the background without delaying input messages.
+    */
+    void onClipboardChanged(ClipboardID, const MarshalledClipboardPtr& data);
 
     //@}
 
@@ -106,7 +117,6 @@ private:
     void infoAcknowledgment();
     void fileChunkReceived();
     void dragInfoReceived();
-    void handle_clipboard_sending_event(const Event&);
 
 private:
     typedef EResult (ServerProxy::*MessageParser)(const std::uint8_t*);
@@ -130,6 +140,13 @@ private:
 
     MessageParser m_parser;
     IEventQueue* m_events;
+
+    // sends clipboard contents without delaying other messages
+    std::unique_ptr<ClipboardStreamer> m_clipboardStreamer;
+
+    // clipboard data being received from the server
+    std::string m_clipboardRecvData;
+    std::size_t m_clipboardRecvExpectedSize = 0;
 };
 
 } // namespace inputleap

@@ -265,6 +265,13 @@ Client::setClipboard(ClipboardID id, const IClipboard* clipboard)
     m_sentClipboard[id] = false;
 }
 
+void Client::setClipboardData(ClipboardID id, const MarshalledClipboardPtr& data)
+{
+    m_screen->setClipboardData(id, data);
+    m_ownClipboard[id]  = false;
+    m_sentClipboard[id] = false;
+}
+
 void
 Client::grabClipboard(ClipboardID id)
 {
@@ -378,6 +385,28 @@ Client::sendClipboard(ClipboardID id)
     assert(m_screen != nullptr);
     assert(m_server != nullptr);
 
+    if (m_screen->hasClipboardSnapshots()) {
+        // the screen captures the clipboard in the background whenever it changes, so the
+        // data is ready and leaving the screen does not have to wait for it
+        MarshalledClipboardPtr data = m_screen->getClipboardSnapshot(id);
+        if (!data) {
+            // the screen sends CLIPBOARD_CHANGED once the capture completes
+            LOG_DEBUG("clipboard %d is not available yet", id);
+            return;
+        }
+        if (data->size() >= m_maximumClipboardSize) {
+            LOG_NOTE("Skipping clipboard transfer because the clipboard contents exceed the "
+                     "size limit of %zu bytes set by the server", m_maximumClipboardSize);
+            return;
+        }
+        if (!m_sentClipboard[id] || !same_clipboard_contents(data, m_dataClipboard[id])) {
+            m_sentClipboard[id] = true;
+            m_dataClipboard[id] = data;
+            m_server->onClipboardChanged(id, data);
+        }
+        return;
+    }
+
     // get clipboard data.  set the clipboard time to the last
     // clipboard time before getting the data from the screen
     // as the screen may detect an unchanged clipboard and
@@ -395,19 +424,18 @@ Client::sendClipboard(ClipboardID id)
         m_timeClipboard[id] = clipboard.getTime();
 
         // marshall the data
-        std::string data = clipboard.marshall();
-        if (data.size() >= m_maximumClipboardSize) {
-            LOG_NOTE("Skipping clipboard transfer because the clipboard"
-                " contents exceeds the %zi MB size limit set by the server",
-                m_maximumClipboardSize);
+        MarshalledClipboardPtr data = marshall_clipboard(clipboard);
+        if (data->size() >= m_maximumClipboardSize) {
+            LOG_NOTE("Skipping clipboard transfer because the clipboard contents exceed the "
+                     "size limit of %zu bytes set by the server", m_maximumClipboardSize);
             return;
         }
 
         // save and send data if different or not yet sent
-        if (!m_sentClipboard[id] || data != m_dataClipboard[id]) {
+        if (!m_sentClipboard[id] || !same_clipboard_contents(data, m_dataClipboard[id])) {
             m_sentClipboard[id] = true;
             m_dataClipboard[id] = data;
-            m_server->onClipboardChanged(id, &clipboard);
+            m_server->onClipboardChanged(id, data);
         }
     }
 }
@@ -481,6 +509,8 @@ Client::setupScreen()
                           [this](const auto& e){ handle_shape_changed(); });
     m_events->add_handler(EventType::CLIPBOARD_GRABBED, get_event_target(),
                           [this](const auto& e){ handle_clipboard_grabbed(e); });
+    m_events->add_handler(EventType::CLIPBOARD_CHANGED, get_event_target(),
+                          [this](const auto& e){ handle_clipboard_changed(e); });
 }
 
 void
@@ -527,6 +557,7 @@ Client::cleanupScreen()
         }
         m_events->remove_handler(EventType::SCREEN_SHAPE_CHANGED, get_event_target());
         m_events->remove_handler(EventType::CLIPBOARD_GRABBED, get_event_target());
+        m_events->remove_handler(EventType::CLIPBOARD_CHANGED, get_event_target());
         delete m_server;
         m_server = nullptr;
     }
@@ -628,6 +659,24 @@ void Client::handle_clipboard_grabbed(const Event& event)
     // if we're not the active screen then send the clipboard now,
     // otherwise we'll wait until we leave.
     if (!m_active) {
+        sendClipboard(info.m_id);
+    }
+}
+
+void Client::handle_clipboard_changed(const Event& event)
+{
+    if (!m_enableClipboard || (m_maximumClipboardSize == 0) || m_server == nullptr) {
+        return;
+    }
+
+    const auto& info = event.get_data_as<IScreen::ClipboardInfo>();
+    if (info.m_id >= kClipboardEnd) {
+        return;
+    }
+
+    // the screen finished capturing a clipboard that we own.  if we're not the active screen
+    // then send it now, otherwise it is sent when we leave.
+    if (m_ownClipboard[info.m_id] && !m_active) {
         sendClipboard(info.m_id);
     }
 }

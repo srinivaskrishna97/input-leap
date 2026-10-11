@@ -69,6 +69,11 @@ public:
 
     bool fakeMediaKey(KeyID id) override;
 
+    // By default the clipboard is read and written synchronously on demand.
+    bool setClipboardData(ClipboardID id, const MarshalledClipboardPtr& data) override;
+    bool hasClipboardSnapshots() const override { return false; }
+    MarshalledClipboardPtr getClipboardSnapshot(ClipboardID) const override { return nullptr; }
+
 protected:
     //! Update mouse buttons
     /*!

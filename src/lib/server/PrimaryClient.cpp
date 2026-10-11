@@ -156,6 +156,28 @@ PrimaryClient::setClipboard(ClipboardID id, const IClipboard* clipboard)
     }
 }
 
+MarshalledClipboardPtr PrimaryClient::getClipboardData(ClipboardID id) const
+{
+    if (m_screen->hasClipboardSnapshots()) {
+        // the screen has already captured the clipboard in the background (or will send a
+        // CLIPBOARD_CHANGED event once it has), so there is no need to read it now
+        return m_screen->getClipboardSnapshot(id);
+    }
+    return BaseClientProxy::getClipboardData(id);
+}
+
+void PrimaryClient::setClipboardData(ClipboardID id, const MarshalledClipboardPtr& data)
+{
+    // ignore if this clipboard is already clean
+    if (m_clipboardDirty[id]) {
+        // this clipboard is now clean
+        m_clipboardDirty[id] = false;
+
+        // set clipboard
+        m_screen->setClipboardData(id, data);
+    }
+}
+
 void
 PrimaryClient::grabClipboard(ClipboardID id)
 {

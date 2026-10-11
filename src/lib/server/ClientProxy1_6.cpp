@@ -21,6 +21,7 @@
 
 #include "inputleap/ProtocolUtil.h"
 #include "inputleap/ClipboardChunk.h"
+#include "inputleap/ClipboardStreamer.h"
 #include "inputleap/Exceptions.h"
 #include "inputleap/FileChunk.h"
 #include "inputleap/StreamChunker.h"
@@ -58,10 +59,12 @@ ClientProxy1_6::ClientProxy1_6(const std::string& name,
                           [this](const auto& e){ handle_write_error(); });
     m_events->add_handler(EventType::FILE_KEEPALIVE, this,
                           [this](const auto& e){ keepAlive(); });
-    m_events->add_handler(EventType::CLIPBOARD_SENDING, this,
-                          [this](const auto& e){ handle_clipboard_sending_event(e); });
     m_events->add_handler(EventType::TIMER, this,
                           [this](const auto& e){ handle_flatline(); });
+
+    m_clipboardStreamer = std::make_unique<ClipboardStreamer>(
+                m_events, get_conn().get_event_target(),
+                [this](const ClipboardChunk& chunk) { get_conn().send_clipboard_chunk_1_6(chunk); });
 
     setHeartbeatRate(kHeartRate, kHeartRate * kHeartBeatsUntilDeath);
 
@@ -96,8 +99,12 @@ void ClientProxy1_6::remove_handlers()
     m_events->remove_handler(EventType::STREAM_OUTPUT_SHUTDOWN, get_conn().get_event_target());
     m_events->remove_handler(EventType::STREAM_INPUT_FORMAT_ERROR, get_conn().get_event_target());
     m_events->remove_handler(EventType::FILE_KEEPALIVE, this);
-    m_events->remove_handler(EventType::CLIPBOARD_SENDING, this);
     m_events->remove_handler(EventType::TIMER, this);
+
+    // stop sending clipboard data
+    if (m_clipboardStreamer) {
+        m_clipboardStreamer->cancel();
+    }
 
     // remove timer
     removeHeartbeatTimer();
@@ -265,15 +272,16 @@ void ClientProxy1_6::handle_flatline()
     disconnect();
 }
 
-void ClientProxy1_6::handle_clipboard_sending_event(const Event& event)
-{
-    get_conn().send_clipboard_chunk_1_6(event.get_data_as<ClipboardChunk>());
-}
-
 bool ClientProxy1_6::getClipboard(ClipboardID id, IClipboard* clipboard) const
 {
-    Clipboard::copy(clipboard, &m_clipboard[id].m_clipboard);
+    IClipboard::unmarshall(clipboard, getClipboardData(id)->data(), 0);
     return true;
+}
+
+MarshalledClipboardPtr ClientProxy1_6::getClipboardData(ClipboardID id) const
+{
+    const auto& data = m_clipboard[id].m_data;
+    return data ? data : empty_marshalled_clipboard();
 }
 
 void ClientProxy1_6::getShape(std::int32_t& x, std::int32_t& y, std::int32_t& w,
@@ -309,17 +317,26 @@ void ClientProxy1_6::setClipboard(ClipboardID id, const IClipboard* clipboard)
 {
     // ignore if this clipboard is already clean
     if (m_clipboard[id].m_dirty) {
-        // this clipboard is now clean
-        m_clipboard[id].m_dirty = false;
-        Clipboard::copy(&m_clipboard[id].m_clipboard, clipboard);
-
-        std::string data = m_clipboard[id].m_clipboard.marshall();
-
-        size_t size = data.size();
-        LOG_DEBUG("sending clipboard %d to \"%s\"", id, getName().c_str());
-
-        StreamChunker::sendClipboard(data, size, id, 0, m_events, this);
+        setClipboardData(id, marshall_clipboard(*clipboard));
     }
+}
+
+void ClientProxy1_6::setClipboardData(ClipboardID id, const MarshalledClipboardPtr& data)
+{
+    // ignore if this clipboard is already clean
+    if (!m_clipboard[id].m_dirty) {
+        return;
+    }
+
+    // this clipboard is now clean
+    m_clipboard[id].m_dirty = false;
+    m_clipboard[id].m_data = data ? data : empty_marshalled_clipboard();
+
+    LOG_DEBUG("sending clipboard %d to \"%s\", size=%zu", id, getName().c_str(),
+              m_clipboard[id].m_data->size());
+
+    // the data is sent in the background so that it does not delay input
+    m_clipboardStreamer->send(id, 0, m_clipboard[id].m_data);
 }
 
 void ClientProxy1_6::grabClipboard(ClipboardID id)
@@ -454,20 +471,20 @@ bool ClientProxy1_6::recvInfo()
 bool ClientProxy1_6::recvClipboard()
 {
     // parse message
-    static std::string dataCached;
     ClipboardID id;
     std::uint32_t seq;
 
-    int r = ClipboardChunk::assemble(getStream(), dataCached, id, seq);
+    int r = ClipboardChunk::assemble(getStream(), m_clipboardRecvData,
+                                     m_clipboardRecvExpectedSize, id, seq);
 
     if (r == kStart) {
-        size_t size = ClipboardChunk::getExpectedSize();
-        LOG_DEBUG("receiving clipboard %d size=%zd", id, size);
+        LOG_DEBUG("receiving clipboard %d size=%zd", id, m_clipboardRecvExpectedSize);
     } else if (r == kFinish) {
         LOG_DEBUG("received client \"%s\" clipboard %d seqnum=%d, size=%zd",
-                getName().c_str(), id, seq, dataCached.size());
+                getName().c_str(), id, seq, m_clipboardRecvData.size());
         // save clipboard
-        m_clipboard[id].m_clipboard.unmarshall(dataCached, 0);
+        m_clipboard[id].m_data = make_marshalled_clipboard(std::move(m_clipboardRecvData));
+        m_clipboardRecvData.clear();
         m_clipboard[id].m_sequenceNumber = seq;
 
         // notify
@@ -538,7 +555,7 @@ void ClientProxy1_6::dragInfoReceived()
 }
 
 ClientProxy1_6::ClientClipboard::ClientClipboard() :
-    m_clipboard(),
+    m_data(empty_marshalled_clipboard()),
     m_sequenceNumber(0),
     m_dirty(true)
 {

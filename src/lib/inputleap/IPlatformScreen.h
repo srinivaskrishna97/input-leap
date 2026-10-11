@@ -19,6 +19,7 @@
 #pragma once
 
 #include "inputleap/DragInformation.h"
+#include "inputleap/ClipboardData.h"
 #include "inputleap/clipboard_types.h"
 #include "inputleap/IScreen.h"
 #include "inputleap/IPrimaryScreen.h"
@@ -83,6 +84,30 @@ public:
     Set the contents of the system clipboard indicated by \c id.
     */
     virtual bool setClipboard(ClipboardID id, const IClipboard*) = 0;
+
+    //! Set clipboard from marshalled data
+    /*!
+    Like setClipboard() but takes the contents in the marshalled form. Implementations may
+    update the system clipboard asynchronously, so that large contents do not block input
+    handling. Updates are applied in the order of the calls.
+    */
+    virtual bool setClipboardData(ClipboardID id, const MarshalledClipboardPtr& data) = 0;
+
+    //! Test if the screen prepares clipboard snapshots
+    /*!
+    Returns true if the screen captures the system clipboard in the background whenever it
+    changes, in which case getClipboardSnapshot() must be used instead of getClipboard().
+    */
+    virtual bool hasClipboardSnapshots() const = 0;
+
+    //! Get the prepared clipboard contents
+    /*!
+    Returns the contents of the clipboard captured in the background, or nullptr if the
+    clipboard has changed and the capture has not completed yet. In the latter case the screen
+    sends a \c CLIPBOARD_CHANGED event once the capture completes. Only valid if
+    hasClipboardSnapshots() returns true.
+    */
+    virtual MarshalledClipboardPtr getClipboardSnapshot(ClipboardID id) const = 0;
 
     //! Check clipboard owner
     /*!

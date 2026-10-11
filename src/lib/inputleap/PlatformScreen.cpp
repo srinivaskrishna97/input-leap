@@ -19,6 +19,7 @@
 #include "inputleap/PlatformScreen.h"
 #include "inputleap/App.h"
 #include "inputleap/ArgsBase.h"
+#include "inputleap/Clipboard.h"
 
 namespace inputleap {
 
@@ -125,6 +126,14 @@ bool PlatformScreen::fakeMediaKey(KeyID id)
 {
     (void) id;
     return false;
+}
+
+bool PlatformScreen::setClipboardData(ClipboardID id, const MarshalledClipboardPtr& data)
+{
+    const auto& contents = data ? data : empty_marshalled_clipboard();
+    Clipboard clipboard;
+    clipboard.unmarshall(contents->data(), 0);
+    return setClipboard(id, &clipboard);
 }
 
 } // namespace inputleap
