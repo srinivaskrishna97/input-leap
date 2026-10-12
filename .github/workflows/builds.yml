@@ -527,10 +527,10 @@ jobs:
               pkgconf \
               git \
               avahi-libdns \
-              libsm \
-              libxinerama \
-              libxrandr \
-              libxtst \
+              libSM \
+              libXinerama \
+              libXrandr \
+              libXtst \
               libxkbcommon \
               glib \
               ninja \
