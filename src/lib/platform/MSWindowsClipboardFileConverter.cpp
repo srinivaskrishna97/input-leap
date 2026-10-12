@@ -21,6 +21,7 @@
 #include "base/Log.h"
 
 #include <shellapi.h>
+#include <shlobj.h>
 
 #include <algorithm>
 #include <chrono>
