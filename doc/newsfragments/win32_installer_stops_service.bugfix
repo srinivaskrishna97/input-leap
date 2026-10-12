@@ -1,0 +1,1 @@
+The Windows installer now stops the InputLeap service and all InputLeap processes before replacing the program files, and starts the service again afterwards, so that upgrades no longer fail with "Access is denied".

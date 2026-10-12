@@ -63,8 +63,8 @@ Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChang
 Type: filesandordirs; Name: "{commonappdata}\InputLeap"
 
 [UninstallRun]
-Filename: {sys}\taskkill; Parameters: "/im {#MyAppExeName} /f /t"; Flags: runhidden
 Filename: {sys}\net.exe; Parameters: "stop {#MyAppServiceName}"; Flags: runhidden
+Filename: {sys}\taskkill; Parameters: "/f /t /im {#MyAppExeName} /im input-leaps.exe /im input-leapc.exe /im {#MyAppServiceExe}"; Flags: runhidden
 Filename: {sys}\sc.exe; Parameters: "delete {#MyAppServiceName}"; Flags: runhidden
 Filename: {sys}\netsh.exe; Parameters: "advfirewall firewall delete rule name=""{#MyAppListenerDesc}"""; Flags: runhidden
 
@@ -87,4 +87,25 @@ begin
 	vcredist2017('14'); // min allowed version is 14.0
 
 	Result := true;
+end;
+
+// Stops the service and every InputLeap process, including the ones the service started,
+// so that the program files can be replaced. The [Run] section starts the service again.
+procedure StopInputLeap();
+var
+	ResultCode: Integer;
+begin
+	Exec(ExpandConstant('{sys}\net.exe'), 'stop {#MyAppServiceName}', '', SW_HIDE,
+	     ewWaitUntilTerminated, ResultCode);
+	Exec(ExpandConstant('{sys}\taskkill.exe'),
+	     '/f /t /im {#MyAppExeName} /im input-leaps.exe /im input-leapc.exe /im {#MyAppServiceExe}',
+	     '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+	// give the system a moment to release the files
+	Sleep(1000);
+end;
+
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+begin
+	StopInputLeap();
+	Result := '';
 end;
