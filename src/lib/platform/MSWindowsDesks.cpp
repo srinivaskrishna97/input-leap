@@ -457,14 +457,23 @@ MSWindowsDesks::secondaryDeskProc(
 
 void MSWindowsDesks::deskMouseMove(std::int32_t x, std::int32_t y) const
 {
-    // when using absolute positioning with mouse_event(),
-    // the normalized device coordinates range over only
-    // the primary screen.
-    std::int32_t w = GetSystemMetrics(SM_CXSCREEN);
-    std::int32_t h = GetSystemMetrics(SM_CYSCREEN);
-    mouse_event(MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE,
-                            (DWORD)((65535.0f * x) / (w - 1) + 0.5f),
-                            (DWORD)((65535.0f * y) / (h - 1) + 0.5f),
+    // Positions are in virtual screen coordinates, which cover all monitors, so the
+    // normalized coordinates of mouse_event() must range over the virtual screen too.
+    // Without MOUSEEVENTF_VIRTUALDESK they range over the primary monitor only, and the
+    // cursor cannot be put on the other monitors.
+    std::int32_t vx = GetSystemMetrics(SM_XVIRTUALSCREEN);
+    std::int32_t vy = GetSystemMetrics(SM_YVIRTUALSCREEN);
+    std::int32_t vw = GetSystemMetrics(SM_CXVIRTUALSCREEN);
+    std::int32_t vh = GetSystemMetrics(SM_CYVIRTUALSCREEN);
+    if (vw <= 1 || vh <= 1) {
+        vx = 0;
+        vy = 0;
+        vw = GetSystemMetrics(SM_CXSCREEN);
+        vh = GetSystemMetrics(SM_CYSCREEN);
+    }
+    mouse_event(MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK,
+                            (DWORD)((65535.0f * (x - vx)) / (vw - 1) + 0.5f),
+                            (DWORD)((65535.0f * (y - vy)) / (vh - 1) + 0.5f),
                             0, 0);
 }
 
