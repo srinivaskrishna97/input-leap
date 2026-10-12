@@ -851,6 +851,11 @@ void EiScreen::handle_system_event(const Event& sysevent)
             case EI_EVENT_SCROLL_STOP:
             case EI_EVENT_SCROLL_CANCEL:
                 break;
+            default:
+                // Event types added in newer libei versions.  None of them need handling: we
+                // never call ei_ping(), so there are no EI_EVENT_PONG events, and the reply to an
+                // EI_EVENT_SYNC request is sent when the event is unref'd below.
+                break;
         }
         ei_event_unref(event);
     }
