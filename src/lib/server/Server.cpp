@@ -1579,6 +1579,19 @@ void Server::onClipboardChanged(BaseClientProxy* sender, ClipboardID id, std::ui
 	// complete the pastes that were waiting for these contents
 	serveClipboardRequests(id);
 
+	// the same contents are often offered for both clipboards, so they don't have to be
+	// fetched again for the other one
+	for (ClipboardID other = 0; other < kClipboardEnd; ++other) {
+		ClipboardInfo& otherClipboard = m_clipboards[other];
+		if (other != id && !otherClipboard.m_clipboardData &&
+			otherClipboard.m_clipboardOwner == clipboard.m_clipboardOwner &&
+			otherClipboard.m_clipboardOffer.describes(*data)) {
+			otherClipboard.m_clipboardData = data;
+			otherClipboard.m_requestedFromOwner = false;
+			serveClipboardRequests(other);
+		}
+	}
+
 	// send the new clipboard to the active screen
 	m_active->setClipboardData(id, clipboard.m_clipboardData);
 }
