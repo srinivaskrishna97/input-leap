@@ -60,7 +60,12 @@ jobs:
 
       - name: Build the Installer
         run: |
-          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" /Qp .\build\installer-inno\input-leap.iss
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" /Qp .\build\installer-inno\input-leap.iss 2>&1 | Tee-Object -FilePath iscc.log
+          if ($LASTEXITCODE -ne 0) {
+            # the job logs need a login to read, so show the compiler's output as annotations
+            Get-Content iscc.log | Select-Object -Last 15 | ForEach-Object { "::error::ISCC: $_" }
+            exit $LASTEXITCODE
+          }
 
       - uses: actions/upload-artifact@v4
         with:
