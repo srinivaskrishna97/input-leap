@@ -19,6 +19,8 @@
 #include <QtCore/QFile>
 #include <QtCore/QTemporaryFile>
 
+#include <stdexcept>
+
 struct TestKey
 {
     int key = 0;
@@ -30,6 +32,8 @@ struct TestKey
 inline QString getTemporaryFilename()
 {
     QTemporaryFile temp_file;
-    temp_file.open();
+    if (!temp_file.open()) {
+        throw std::runtime_error("Could not create a temporary file");
+    }
     return temp_file.fileName();
 }
