@@ -169,7 +169,7 @@ void ClipboardStreamer::pump()
             if (budget == 0) {
                 break;
             }
-            std::size_t size = (std::min)(kChunkSize, bytes.size() - transfer.offset);
+            std::size_t size = (std::min)(kClipboardChunkSize, bytes.size() - transfer.offset);
 
             ClipboardChunk chunk;
             chunk.id_ = transfer.id;

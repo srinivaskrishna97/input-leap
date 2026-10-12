@@ -24,8 +24,6 @@
 #include "inputleap/IClient.h"
 #include "inputleap/Clipboard.h"
 #include "inputleap/ClipboardData.h"
-
-#include <optional>
 #include "inputleap/DragInformation.h"
 #include "inputleap/INode.h"
 #include "inputleap/ClientArgs.h"
@@ -233,10 +231,12 @@ private:
     MarshalledClipboardPtr m_dataClipboard[kClipboardEnd];
 
     // the latest contents offered by the server for each clipboard
-    std::optional<ClipboardOffer> m_offeredClipboard[kClipboardEnd];
+    bool m_hasOfferedClipboard[kClipboardEnd] = {};
+    ClipboardOffer m_offeredClipboard[kClipboardEnd];
 
     // the hash of the last contents whose data was sent to the server
-    std::optional<std::uint64_t> m_pushedClipboardHash;
+    bool m_pushedClipboard = false;
+    std::uint64_t m_pushedClipboardHash = 0;
     IEventQueue* m_events;
     std::size_t m_expectedFileSize;
     std::string m_receivedFileData;

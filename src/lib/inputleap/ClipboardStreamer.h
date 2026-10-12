@@ -31,6 +31,12 @@ namespace inputleap {
 class EventQueueTimer;
 class IEventQueue;
 
+/// The most clipboard data sent in one chunk message.
+constexpr std::size_t kClipboardChunkSize = 32 * 1024;
+
+/// The default amount of clipboard data that a ClipboardStreamer keeps in the output buffer.
+constexpr std::size_t kClipboardStreamerWindowSize = 2 * kClipboardChunkSize;
+
 /*! Sends clipboard contents over a connection without delaying other messages.
 
 Clipboard contents are sent as a sequence of chunk messages. Writing all chunks at once queues
@@ -54,14 +60,11 @@ public:
     */
     using ChunkWriter = std::function<void(const ClipboardChunk& chunk, bool encoded)>;
 
-    static constexpr std::size_t kChunkSize = 32 * 1024;
-    static constexpr std::size_t kDefaultWindowSize = 2 * kChunkSize;
-
     /*! \p stream_target is the event target of the connection's stream. The streamer listens for
         STREAM_OUTPUT_FLUSHED events on it.
     */
     ClipboardStreamer(IEventQueue* events, const EventTarget* stream_target, ChunkWriter writer,
-                      std::size_t window_size = kDefaultWindowSize);
+                      std::size_t window_size = kClipboardStreamerWindowSize);
     ~ClipboardStreamer();
 
     ClipboardStreamer(const ClipboardStreamer&) = delete;

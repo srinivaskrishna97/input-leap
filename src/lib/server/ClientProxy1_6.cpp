@@ -355,7 +355,7 @@ void ClientProxy1_6::setClipboardData(ClipboardID id, const MarshalledClipboardP
             if (push) {
                 pushClipboardData(id, contents);
             }
-        } else if (m_clipboardOffered[id] && m_clipboardOffered[id]->describes(*contents) &&
+        } else if (m_clipboardHasOffer[id] && m_clipboardOffered[id].describes(*contents) &&
                    contents->size() <= kClipboardEagerSize &&
                    !wasClipboardDataPushed(*contents)) {
             // the contents were offered before their data was known
@@ -427,6 +427,7 @@ void ClientProxy1_6::sendClipboardOffer(ClipboardID id, const ClipboardOffer& of
 {
     // data of older contents of this clipboard is outdated now
     m_clipboardStreamer->cancel(id);
+    m_clipboardHasOffer[id] = true;
     m_clipboardOffered[id] = offer;
     LOG_DEBUG("offering clipboard %d to \"%s\", size=%u", id, getName().c_str(), offer.size);
     get_conn().send_clipboard_offer(id, flags, offer);
@@ -445,12 +446,13 @@ void ClientProxy1_6::pushClipboardData(ClipboardID id, const MarshalledClipboard
     LOG_DEBUG("sending clipboard %d to \"%s\", size=%zu, sent=%llu", id, getName().c_str(),
               data->size(), static_cast<unsigned long long>(payload.header.encoded_size));
     sendClipboardTransfer(id, payload);
+    m_clipboardPushed = true;
     m_clipboardPushedHash = data->hash();
 }
 
 bool ClientProxy1_6::wasClipboardDataPushed(const MarshalledClipboard& data) const
 {
-    return m_clipboardPushedHash && *m_clipboardPushedHash == data.hash();
+    return m_clipboardPushed && m_clipboardPushedHash == data.hash();
 }
 
 void ClientProxy1_6::grabClipboard(ClipboardID id)
@@ -742,7 +744,7 @@ bool ClientProxy1_6::recvGrabClipboard()
     }
 
     // the client's clipboard has changed, so data sent before is not there anymore
-    m_clipboardPushedHash.reset();
+    m_clipboardPushed = false;
 
     // notify
     ClipboardInfo info;

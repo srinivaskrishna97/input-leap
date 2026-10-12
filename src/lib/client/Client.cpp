@@ -270,11 +270,12 @@ void Client::setClipboardData(ClipboardID id, const MarshalledClipboardPtr& data
     m_screen->setClipboardData(id, data);
     m_ownClipboard[id]  = false;
     m_sentClipboard[id] = false;
-    m_offeredClipboard[id].reset();
+    m_hasOfferedClipboard[id] = false;
 }
 
 void Client::setClipboardOffer(ClipboardID id, const ClipboardOffer& offer, std::uint32_t flags)
 {
+    m_hasOfferedClipboard[id] = true;
     m_offeredClipboard[id] = offer;
     m_ownClipboard[id]  = false;
     m_sentClipboard[id] = false;
@@ -295,7 +296,7 @@ void Client::setOfferedClipboardData(ClipboardID id, const MarshalledClipboardPt
     // offered. The contents may have been offered as either clipboard.
     bool wanted = false;
     for (ClipboardID other = 0; other < kClipboardEnd; ++other) {
-        if (m_offeredClipboard[other] && m_offeredClipboard[other]->describes(*data)) {
+        if (m_hasOfferedClipboard[other] && m_offeredClipboard[other].describes(*data)) {
             wanted = true;
         }
     }
@@ -503,11 +504,12 @@ void Client::sendClipboardContents(ClipboardID id, const MarshalledClipboardPtr&
     // Offer the contents; the server asks for them when they are needed. Small contents are
     // sent right away, unless they were sent before for the other clipboard.
     bool push = data->size() <= kClipboardEagerSize &&
-                !(m_pushedClipboardHash && *m_pushedClipboardHash == data->hash());
+                !(m_pushedClipboard && m_pushedClipboardHash == data->hash());
     m_server->onClipboardOffered(id, ClipboardOffer::describe(*data),
                                  push ? kClipboardOfferDataFollows : 0);
     if (push) {
         m_server->onClipboardChanged(id, data);
+        m_pushedClipboard = true;
         m_pushedClipboardHash = data->hash();
     }
 }
@@ -730,7 +732,7 @@ void Client::handle_clipboard_grabbed(const Event& event)
     m_ownClipboard[info.m_id]  = true;
     m_sentClipboard[info.m_id] = false;
     m_timeClipboard[info.m_id] = 0;
-    m_offeredClipboard[info.m_id].reset();
+    m_hasOfferedClipboard[info.m_id] = false;
 
     // if we're not the active screen then send the clipboard now,
     // otherwise we'll wait until we leave.
@@ -770,7 +772,7 @@ void Client::handle_clipboard_data_requested(const Event& event)
     // single system clipboard request them as any clipboard that offered them.
     ClipboardID id = info.id;
     for (ClipboardID other = 0; other < kClipboardEnd; ++other) {
-        if (m_offeredClipboard[other] && m_offeredClipboard[other]->hash == info.offer.hash) {
+        if (m_hasOfferedClipboard[other] && m_offeredClipboard[other].hash == info.offer.hash) {
             id = other;
             break;
         }

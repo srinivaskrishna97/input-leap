@@ -172,7 +172,7 @@ void PrimaryClient::setClipboardData(ClipboardID id, const MarshalledClipboardPt
     if (m_clipboardDirty[id]) {
         // this clipboard is now clean
         m_clipboardDirty[id] = false;
-        m_clipboardOffered[id].reset();
+        m_clipboardHasOffer[id] = false;
 
         // set clipboard
         m_screen->setClipboardData(id, data);
@@ -180,7 +180,7 @@ void PrimaryClient::setClipboardData(ClipboardID id, const MarshalledClipboardPt
     }
 
     // the data of offered contents has become available, so a paste won't have to wait
-    if (data && m_clipboardOffered[id] && m_clipboardOffered[id]->describes(*data)) {
+    if (data && m_clipboardHasOffer[id] && m_clipboardOffered[id].describes(*data)) {
         m_screen->setClipboardData(id, data);
     }
 }
@@ -197,6 +197,7 @@ void PrimaryClient::setClipboardOffer(ClipboardID id, const ClipboardOffer& offe
         return;
     }
     m_clipboardDirty[id] = false;
+    m_clipboardHasOffer[id] = true;
     m_clipboardOffered[id] = offer;
     m_screen->setClipboardOffer(id, offer);
 }
@@ -219,7 +220,7 @@ PrimaryClient::grabClipboard(ClipboardID id)
 
     // clipboard is dirty (because someone else owns it now)
     m_clipboardDirty[id] = true;
-    m_clipboardOffered[id].reset();
+    m_clipboardHasOffer[id] = false;
 }
 
 void

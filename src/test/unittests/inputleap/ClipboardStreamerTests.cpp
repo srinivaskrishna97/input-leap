@@ -103,9 +103,9 @@ TEST_F(ClipboardStreamerTest, writes_only_first_window_immediately)
     EXPECT_EQ(chunks_[0].mark_, kDataStart);
     EXPECT_EQ(chunks_[0].data_, "1000000");
     EXPECT_EQ(chunks_[0].sequence_, 7u);
-    EXPECT_EQ(data_bytes_written(), ClipboardStreamer::kDefaultWindowSize);
+    EXPECT_EQ(data_bytes_written(), kClipboardStreamerWindowSize);
     EXPECT_FALSE(streamer_.is_idle());
-    EXPECT_EQ(streamer_.pending_bytes(), data->size() - ClipboardStreamer::kDefaultWindowSize);
+    EXPECT_EQ(streamer_.pending_bytes(), data->size() - kClipboardStreamerWindowSize);
 }
 
 TEST_F(ClipboardStreamerTest, each_flush_writes_one_more_window)
@@ -113,10 +113,10 @@ TEST_F(ClipboardStreamerTest, each_flush_writes_one_more_window)
     auto data = data_of_size(1000 * 1000, 'a');
     streamer_.send(0, 0, data);
     streamer_.on_output_flushed();
-    EXPECT_EQ(data_bytes_written(), 2 * ClipboardStreamer::kDefaultWindowSize);
+    EXPECT_EQ(data_bytes_written(), 2 * kClipboardStreamerWindowSize);
     for (const auto& chunk : chunks_) {
         if (chunk.mark_ == kDataChunk) {
-            EXPECT_LE(chunk.data_.size(), ClipboardStreamer::kChunkSize);
+            EXPECT_LE(chunk.data_.size(), kClipboardChunkSize);
         }
     }
 }

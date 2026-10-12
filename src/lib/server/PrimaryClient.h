@@ -19,8 +19,6 @@
 #pragma once
 
 #include "server/BaseClientProxy.h"
-
-#include <optional>
 #include "inputleap/Fwd.h"
 #include "inputleap/protocol_types.h"
 
@@ -168,7 +166,8 @@ private:
     bool m_clipboardDirty[kClipboardEnd];
 
     // contents put on the clipboard without their data
-    std::optional<ClipboardOffer> m_clipboardOffered[kClipboardEnd];
+    bool m_clipboardHasOffer[kClipboardEnd] = {};
+    ClipboardOffer m_clipboardOffered[kClipboardEnd];
     std::int32_t m_fakeInputCount;
 };
 

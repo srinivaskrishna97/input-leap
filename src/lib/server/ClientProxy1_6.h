@@ -27,7 +27,6 @@
 
 #include <limits>
 #include <memory>
-#include <optional>
 
 namespace inputleap {
 
@@ -146,12 +145,14 @@ protected:
     ClipboardTransferReceiver m_clipboardReceiver{(std::numeric_limits<std::size_t>::max)()};
 
     // the last contents offered to the client for each clipboard
-    std::optional<ClipboardOffer> m_clipboardOffered[kClipboardEnd];
+    bool m_clipboardHasOffer[kClipboardEnd] = {};
+    ClipboardOffer m_clipboardOffered[kClipboardEnd];
 
     // the hash of the last contents whose data was sent to the client.  the client has a
     // single system clipboard for both clipboards on most platforms, so the same data does not
     // need to be sent twice.
-    std::optional<std::uint64_t> m_clipboardPushedHash;
+    bool m_clipboardPushed = false;
+    std::uint64_t m_clipboardPushedHash = 0;
 
 protected:
     typedef bool (ClientProxy1_6::*MessageParser)(const std::uint8_t*);
