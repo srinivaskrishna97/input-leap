@@ -88,8 +88,9 @@ public:
     /// Puts offered contents on the clipboard without their data. Applied asynchronously.
     void offer(const ClipboardOffer& offer);
 
-    /*! Supplies the data of the offered contents. Returns false if \p data does not belong to
-        the offer that is on the clipboard, in which case it should be applied with apply().
+    /*! Supplies the data of the offered contents, also while the offer is still waiting to be
+        put on the clipboard. Returns false if \p data does not belong to the latest offer, in
+        which case it should be applied with apply().
     */
     bool deliver(const MarshalledClipboardPtr& data);
 
@@ -129,7 +130,7 @@ private:
     void process_commands();
     bool apply_now(const MarshalledClipboardPtr& data);
     bool clear_now();
-    bool offer_now(const ClipboardOffer& offer);
+    bool offer_now(const ClipboardOffer& offer, const MarshalledClipboardPtr& data);
     void capture_now();
     void schedule_capture(UINT delay_ms);
 

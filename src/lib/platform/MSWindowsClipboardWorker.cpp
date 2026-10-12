@@ -277,6 +277,18 @@ bool MSWindowsClipboardWorker::deliver(const MarshalledClipboardPtr& data)
         return false;
     }
     std::lock_guard<std::mutex> lock(mutex_);
+
+    // The data often arrives right after the offer, before the worker has put the offer on the
+    // clipboard. It then goes with the offer, as applying it instead would replace the offer.
+    if (!commands_.empty()) {
+        Command& latest = commands_.back();
+        if (latest.kind == Command::Kind::Offer && latest.offer.describes(*data)) {
+            latest.data = data;
+            LOG_DEBUG("received offered clipboard data, size=%zu", data->size());
+            return true;
+        }
+    }
+
     if (!offer_.active || !offer_.offer.describes(*data)) {
         return false;
     }
@@ -333,7 +345,7 @@ void MSWindowsClipboardWorker::process_commands()
             ok = clear_now();
             break;
         case Command::Kind::Offer:
-            ok = offer_now(command.offer);
+            ok = offer_now(command.offer, command.data);
             break;
         }
 
@@ -393,14 +405,27 @@ bool MSWindowsClipboardWorker::clear_now()
     return true;
 }
 
-bool MSWindowsClipboardWorker::offer_now(const ClipboardOffer& offer)
+bool MSWindowsClipboardWorker::offer_now(const ClipboardOffer& offer,
+                                         const MarshalledClipboardPtr& data)
 {
     {
         // the same contents are often offered for both InputLeap clipboards
         std::lock_guard<std::mutex> lock(mutex_);
         if (offer_.active && offer_.offer == offer && GetClipboardOwner() == window_) {
+            if (data && !offer_.data) {
+                offer_.data = data;
+                offer_cv_.notify_all();
+            }
             return true;
         }
+    }
+
+    // The contents may already be on the clipboard with their data, e.g. when the data was
+    // applied because it arrived while the worker was busy putting an earlier offer of the
+    // same contents on the clipboard. Offering them again would throw the data away.
+    if (last_applied_ && offer.describes(*last_applied_) &&
+        last_applied_sequence_ == GetClipboardSequenceNumber()) {
+        return true;
     }
 
     MSWindowsClipboard clipboard(window_);
@@ -421,6 +446,7 @@ bool MSWindowsClipboardWorker::offer_now(const ClipboardOffer& offer)
         offer_ = OfferState{};
         offer_.active = true;
         offer_.offer = offer;
+        offer_.data = data;
     }
     clipboard.close();
 
