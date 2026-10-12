@@ -788,6 +788,7 @@ void EiScreen::handle_system_event(const Event& sysevent)
                 // We must release the xdg-portal InputCapture in case it is still active
                 // so that the cursor is usable and not stuck on the InputLeap server.
                 LOG_WARN("disconnected from eis, will afterwards commence attempt to reconnect");
+#if HAVE_LIBPORTAL_INPUTCAPTURE
                 if (is_primary_) {
                     LOG_DEBUG("re-allocating portal input capture connection and releasing active captures");
                     if (portal_input_capture_) {
@@ -798,6 +799,7 @@ void EiScreen::handle_system_event(const Event& sysevent)
                         portal_input_capture_ = new PortalInputCapture(this, this->events_);
                     }
                 }
+#endif
                 this->handle_portal_session_closed(sysevent);
                 break;
             case EI_EVENT_DEVICE_PAUSED:
