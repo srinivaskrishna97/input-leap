@@ -521,6 +521,7 @@ jobs:
       with:
         usesh: true
         prepare: |
+          freebsd-version
           pkg install -y \
               cmake-core \
               pkgconf \
@@ -535,15 +536,27 @@ jobs:
               ninja \
               qt6-base \
               qt6-tools \
-              qt6-declarative
+              qt6-declarative > /tmp/pkg.log 2>&1 || {
+              tail -n 30 /tmp/pkg.log
+              tail -n 8 /tmp/pkg.log | sed 's/^/::error::pkg: /'
+              exit 1
+          }
 
         run: |
           git config --global --add safe.directory /home/runner/work/input-leap/input-leap
           git submodule update --init --recursive
           mkdir build
           cd build
-          cmake -G Ninja -DCMAKE_BUILD_TYPE=Debug -DCMAKE_UNITY_BUILD=1 -DINPUTLEAP_BUILD_INSTALLER=OFF ..
-          cmake --build . --parallel
+          cmake -G Ninja -DCMAKE_BUILD_TYPE=Debug -DCMAKE_UNITY_BUILD=1 -DINPUTLEAP_BUILD_INSTALLER=OFF .. > /tmp/cmake.log 2>&1 || {
+              tail -n 40 /tmp/cmake.log
+              grep -i -m 8 -A 2 'error' /tmp/cmake.log | sed 's/^/::error::cmake: /'
+              exit 1
+          }
+          cmake --build . --parallel > /tmp/build.log 2>&1 || {
+              tail -n 60 /tmp/build.log
+              grep -m 8 -E 'error|undefined reference|FAILED' /tmp/build.log | sed 's/^/::error::build: /'
+              exit 1
+          }
 
   flatpak:
     runs-on: ubuntu-latest
