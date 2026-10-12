@@ -37,6 +37,7 @@ class MSWindowsDesks;
 class MSWindowsKeyState;
 class MSWindowsScreenSaver;
 class MSWindowsClipboardWorker;
+class MSWindowsClipboardStatusWindow;
 class Thread;
 class MSWindowsDropTarget;
 
@@ -119,6 +120,8 @@ public:
     bool supportsClipboardOffers() const override;
     void setClipboardOffer(ClipboardID id, const ClipboardOffer& offer) override;
     void clipboardDataUnavailable(ClipboardID id, const ClipboardOffer& offer) override;
+    void setClipboardTransferProgress(const ClipboardTransferProgress& progress) override;
+    void setClipboardStatusEnabled(bool enabled) override;
     virtual void checkClipboards();
     virtual void openScreensaver(bool notify);
     virtual void closeScreensaver();
@@ -312,6 +315,10 @@ private:
 
     // reads and writes the clipboard in the background
     std::unique_ptr<MSWindowsClipboardWorker> m_clipboardWorker;
+
+    // shows the progress of clipboard transfers; created when the first one starts
+    std::unique_ptr<MSWindowsClipboardStatusWindow> m_clipboardStatus;
+    bool m_clipboardStatusEnabled = true;
 
     // one desk per desktop and a cond var to communicate with it
     MSWindowsDesks* m_desks;

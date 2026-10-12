@@ -17,6 +17,7 @@
  */
 
 #include "client/Client.h"
+#include "inputleap/IClipboard.h"
 
 #include "client/ServerProxy.h"
 #include "inputleap/Screen.h"
@@ -315,15 +316,33 @@ void Client::clipboardDataUnavailable(ClipboardID id, const ClipboardOffer& offe
 
 void Client::clipboardDataRequested(ClipboardID id, const ClipboardOffer& offer)
 {
-    // the offered contents are the ones that were last sent for one of the clipboards
+    // the offered contents are the ones that were last sent for one of the clipboards, possibly
+    // without the files if the server cannot take them
     for (ClipboardID other = 0; other < kClipboardEnd; ++other) {
-        const auto& data = m_dataClipboard[other];
+        MarshalledClipboardPtr data = m_dataClipboard[other];
+        if (data && (m_server->clipboardCapabilities() & kClipboardCapFiles) == 0) {
+            data = without_clipboard_formats(data, 1u << IClipboard::kFiles);
+        }
         if (data && data->hash() == offer.hash) {
             m_server->provideClipboardData(id, data);
             return;
         }
     }
     m_server->provideClipboardUnavailable(id, offer);
+}
+
+void Client::clipboardTransferProgress(std::uint64_t hash,
+                                       const ClipboardTransferProgress& progress)
+{
+    // the offer tells what kind of contents are arriving
+    ClipboardTransferProgress info = progress;
+    for (ClipboardID id = 0; id < kClipboardEnd; ++id) {
+        if (m_hasOfferedClipboard[id] && m_offeredClipboard[id].hash == hash) {
+            info.formats = m_offeredClipboard[id].formats;
+            break;
+        }
+    }
+    m_screen->setClipboardTransferProgress(info);
 }
 
 void
@@ -494,8 +513,14 @@ Client::sendClipboard(ClipboardID id)
     }
 }
 
-void Client::sendClipboardContents(ClipboardID id, const MarshalledClipboardPtr& data)
+void Client::sendClipboardContents(ClipboardID id, const MarshalledClipboardPtr& contents)
 {
+    // files are only sent to servers that can put them on their clipboard
+    MarshalledClipboardPtr data = contents;
+    if ((m_server->clipboardCapabilities() & kClipboardCapFiles) == 0) {
+        data = without_clipboard_formats(contents, 1u << IClipboard::kFiles);
+    }
+
     if ((m_server->clipboardCapabilities() & kClipboardCapOffers) == 0) {
         m_server->onClipboardChanged(id, data);
         return;

@@ -97,6 +97,9 @@ public:
 
     /// The header of the current or last transfer.
     const ClipboardTransferHeader& header() const { return header_; }
+    /// The bytes received so far of the current transfer, and the bytes it will have in total.
+    std::uint64_t received() const { return buffer_.size(); }
+    std::uint64_t expected() const { return header_.encoded_size; }
 
 private:
     std::size_t max_size_;

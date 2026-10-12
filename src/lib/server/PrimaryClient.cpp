@@ -319,4 +319,9 @@ PrimaryClient::setOptions(const OptionsList& options)
     m_screen->setOptions(options);
 }
 
+void PrimaryClient::setClipboardTransferProgress(const ClipboardTransferProgress& progress)
+{
+    m_screen->setClipboardTransferProgress(progress);
+}
+
 } // namespace inputleap

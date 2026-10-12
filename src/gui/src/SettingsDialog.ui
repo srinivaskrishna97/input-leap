@@ -133,6 +133,16 @@
         </property>
        </widget>
       </item>
+      <item row="6" column="0" colspan="2">
+       <widget class="QCheckBox" name="m_pCheckBoxClipboardStatus">
+        <property name="toolTip">
+         <string>Shows a small box in the corner of the screen while large clipboard contents arrive from another computer.</string>
+        </property>
+        <property name="text">
+         <string>Show the &amp;progress of large clipboard transfers</string>
+        </property>
+       </widget>
+      </item>
      </layout>
     </widget>
    </item>
@@ -337,6 +347,7 @@
   <tabstop>m_pCheckBoxMinimizeToTray</tabstop>
   <tabstop>m_pCheckBoxAutoHide</tabstop>
   <tabstop>m_pCheckBoxAutoStart</tabstop>
+  <tabstop>m_pCheckBoxClipboardStatus</tabstop>
   <tabstop>m_pSpinBoxPort</tabstop>
   <tabstop>m_pLineEditInterface</tabstop>
   <tabstop>m_pCheckBoxEnableCrypto</tabstop>

@@ -66,6 +66,7 @@ public:
         kJpeg,            //!< JPEG format
         kTiff,            //!< TIFF format
         kWebp,            //!< WEBP format
+        kFiles,           //!< Files and directories, see ClipboardFiles.h
         kNumFormats        //!< The number of clipboard formats
     };
 

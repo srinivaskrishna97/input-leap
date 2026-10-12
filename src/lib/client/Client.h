@@ -160,6 +160,12 @@ public:
     //! The server requests clipboard contents that this screen has offered
     void clipboardDataRequested(ClipboardID, const ClipboardOffer& offer);
 
+    //! Notify of the progress of a clipboard transfer
+    /*!
+    Called while the contents identified by \p hash arrive from the server.
+    */
+    void clipboardTransferProgress(std::uint64_t hash, const ClipboardTransferProgress& progress);
+
     void grabClipboard(ClipboardID) override;
     void setClipboardDirty(ClipboardID, bool) override;
     void keyDown(KeyID, KeyModifierMask, KeyButton) override;

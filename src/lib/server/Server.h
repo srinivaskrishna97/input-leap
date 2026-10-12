@@ -302,6 +302,7 @@ private:
     void handle_clipboard_offered(const Event& event, BaseClientProxy* client);
     void handle_clipboard_data_requested(const Event& event, BaseClientProxy* client);
     void handle_clipboard_data_unavailable(const Event& event, BaseClientProxy* client);
+    void handle_clipboard_transfer_progress(const Event& event);
     void handle_key_down_event(const Event& event);
     void handle_key_up_event(const Event& event);
     void handle_key_repeat_event(const Event& event);

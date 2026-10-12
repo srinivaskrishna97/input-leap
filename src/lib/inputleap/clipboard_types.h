@@ -57,8 +57,31 @@ static const std::uint32_t kClipboardCapOffers      = 1u << 0;
 static const std::uint32_t kClipboardCapCompression = 1u << 1;
 
 // all capabilities implemented by this version
+// The peer accepts the IClipboard::kFiles format.
+static const std::uint32_t kClipboardCapFiles       = 1u << 2;
+
 static const std::uint32_t kClipboardCapsSupported  = kClipboardCapOffers |
-                                                      kClipboardCapCompression;
+                                                      kClipboardCapCompression |
+                                                      kClipboardCapFiles;
+
+//! The state of clipboard contents arriving from another screen, for showing their progress
+struct ClipboardTransferProgress {
+    enum class State {
+        Receiving,
+        Completed,
+        Failed,
+    };
+    State state = State::Receiving;
+    std::uint64_t received = 0;   //!< bytes received so far
+    std::uint64_t total = 0;      //!< bytes of the whole transfer
+    std::uint32_t formats = 0;    //!< a bit per IClipboard::EFormat, if known
+};
+
+//! The progress of a transfer together with the hash that identifies its contents
+struct ClipboardTransferProgressInfo {
+    std::uint64_t hash = 0;
+    ClipboardTransferProgress progress;
+};
 
 // clipboard contents up to this size are sent along with the offer
 static const std::uint32_t kClipboardEagerSize      = 1024 * 1024;

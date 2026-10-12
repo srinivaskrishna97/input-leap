@@ -104,4 +104,42 @@ TEST(ClipboardDataTests, empty_clipboard_has_no_formats)
     EXPECT_EQ(empty.get(), empty_marshalled_clipboard().get());
 }
 
+TEST(ClipboardDataTests, without_formats_strips_only_the_given_formats)
+{
+    Clipboard clipboard;
+    clipboard.open(0);
+    clipboard.clear();
+    clipboard.add(IClipboard::kText, "hello");
+    clipboard.add(IClipboard::kFiles, std::string("ILFL\0\0\0\1\0\0\0\0", 12));
+    clipboard.add(IClipboard::kHTML, "<b>hello</b>");
+    clipboard.close();
+    auto data = marshall_clipboard(clipboard);
+    ASSERT_EQ(marshalled_clipboard_formats(data->data()),
+              (1u << IClipboard::kText) | (1u << IClipboard::kFiles) | (1u << IClipboard::kHTML));
+
+    // nothing to strip: the same contents are returned
+    EXPECT_EQ(without_clipboard_formats(data, 1u << IClipboard::kBitmap).get(), data.get());
+    EXPECT_EQ(without_clipboard_formats(nullptr, 1u << IClipboard::kFiles), nullptr);
+
+    auto stripped = without_clipboard_formats(data, 1u << IClipboard::kFiles);
+    ASSERT_NE(stripped, nullptr);
+    EXPECT_NE(stripped.get(), data.get());
+    EXPECT_EQ(marshalled_clipboard_formats(stripped->data()),
+              (1u << IClipboard::kText) | (1u << IClipboard::kHTML));
+    EXPECT_NE(stripped->hash(), data->hash());
+
+    Clipboard copy;
+    copy.unmarshall(stripped->data(), 0);
+    copy.open(0);
+    EXPECT_EQ(copy.get(IClipboard::kText), "hello");
+    EXPECT_EQ(copy.get(IClipboard::kHTML), "<b>hello</b>");
+    EXPECT_FALSE(copy.has(IClipboard::kFiles));
+    copy.close();
+
+    // stripping everything leaves an empty clipboard
+    auto none = without_clipboard_formats(data, 0xffffffffu);
+    EXPECT_EQ(marshalled_clipboard_formats(none->data()), 0u);
+    EXPECT_EQ(none->data(), std::string(4, '\0'));
+}
+
 } // namespace inputleap

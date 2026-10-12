@@ -141,6 +141,12 @@ public:
     void provideClipboardData(ClipboardID id, const MarshalledClipboardPtr& data) override;
     void provideClipboardUnavailable(ClipboardID id, const ClipboardOffer& offer) override;
 
+    //! Show the progress of a clipboard transfer
+    /*!
+    Shows the progress of clipboard contents that arrive from a client.
+    */
+    void setClipboardTransferProgress(const ClipboardTransferProgress& progress);
+
     void keyDown(KeyID, KeyModifierMask, KeyButton) override;
     void keyRepeat(KeyID, KeyModifierMask, std::int32_t count, KeyButton) override;
     void keyUp(KeyID, KeyModifierMask, KeyButton) override;

@@ -533,8 +533,10 @@ ClientApp::startNode()
 std::unique_ptr<IPlatformScreen> ClientApp::create_platform_screen()
 {
 #if WINAPI_MSWINDOWS
-    return std::make_unique<MSWindowsScreen>(false, args().m_noHooks, args().m_stopOnDeskSwitch,
-                                             m_events);
+    std::unique_ptr<IPlatformScreen> screen = std::make_unique<MSWindowsScreen>(
+        false, args().m_noHooks, args().m_stopOnDeskSwitch, m_events);
+    screen->setClipboardStatusEnabled(args().m_clipboardStatus);
+    return screen;
 #endif
 #if WINAPI_LIBEI
     if (args().use_ei) {

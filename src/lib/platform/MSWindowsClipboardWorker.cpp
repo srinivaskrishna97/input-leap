@@ -48,8 +48,10 @@ const UINT kClipboardRetryDelayMs = 50;
 const int kClipboardMaxCaptureRetries = 40;
 const int kClipboardMaxApplyRetries = 40;
 
-// How long a pasting application waits for offered contents to arrive from another screen.
+// How long a pasting application waits for offered contents to arrive from another screen:
+// a fixed time plus an allowance that grows with the size of the contents.
 const int kClipboardRenderTimeoutSeconds = 30;
+const std::uint64_t kClipboardRenderBytesPerSecond = 512 * 1024;
 
 std::once_flag g_clipboard_worker_class_once;
 ATOM g_clipboard_worker_class = 0;
@@ -484,7 +486,10 @@ MarshalledClipboardPtr MSWindowsClipboardWorker::wait_for_offer_data()
         lock.lock();
     }
 
-    bool done = offer_cv_.wait_for(lock, std::chrono::seconds(kClipboardRenderTimeoutSeconds),
+    auto timeout = std::chrono::seconds(
+        kClipboardRenderTimeoutSeconds +
+        static_cast<long long>(offer.size / kClipboardRenderBytesPerSecond));
+    bool done = offer_cv_.wait_for(lock, timeout,
                                    [this, &offer]() {
         return !offer_.active || offer_.offer != offer || offer_.data || offer_.unavailable;
     });

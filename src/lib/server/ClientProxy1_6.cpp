@@ -17,6 +17,7 @@
  */
 
 #include "server/ClientProxy1_6.h"
+#include "inputleap/IClipboard.h"
 #include "ClientConnectionByStream.h"
 
 #include "inputleap/ProtocolUtil.h"
@@ -341,7 +342,12 @@ void ClientProxy1_6::setClipboard(ClipboardID id, const IClipboard* clipboard)
 
 void ClientProxy1_6::setClipboardData(ClipboardID id, const MarshalledClipboardPtr& data)
 {
-    const auto& contents = data ? data : empty_marshalled_clipboard();
+    MarshalledClipboardPtr contents = data ? data : empty_marshalled_clipboard();
+
+    // files are only sent to clients that can put them on their clipboard
+    if ((m_clipboardCaps & kClipboardCapFiles) == 0) {
+        contents = without_clipboard_formats(contents, 1u << IClipboard::kFiles);
+    }
 
     if (supportsClipboardOffers()) {
         if (m_clipboard[id].m_dirty) {
@@ -699,9 +705,21 @@ bool ClientProxy1_6::recvClipboardData()
     }
 
     auto status = m_clipboardReceiver.add(mark, data);
+
+    ClipboardTransferProgressInfo progress;
+    progress.hash = m_clipboardReceiver.header().hash;
+    progress.progress.received = m_clipboardReceiver.received();
+    progress.progress.total = m_clipboardReceiver.expected();
     if (status == ClipboardTransferReceiver::Status::InProgress) {
+        m_events->add_event(EventType::CLIPBOARD_TRANSFER_PROGRESS, get_event_target(),
+                            create_event_data<ClipboardTransferProgressInfo>(progress));
         return true;
     }
+    progress.progress.state = status == ClipboardTransferReceiver::Status::Complete
+                                  ? ClipboardTransferProgress::State::Completed
+                                  : ClipboardTransferProgress::State::Failed;
+    m_events->add_event(EventType::CLIPBOARD_TRANSFER_PROGRESS, get_event_target(),
+                        create_event_data<ClipboardTransferProgressInfo>(progress));
 
     if (status == ClipboardTransferReceiver::Status::Complete) {
         auto contents = m_clipboardReceiver.take();

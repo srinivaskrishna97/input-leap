@@ -130,6 +130,13 @@ public:
     */
     virtual void clipboardDataUnavailable(ClipboardID id, const ClipboardOffer& offer) = 0;
 
+    /*! Shows the progress of clipboard contents that arrive from another screen, if the
+        platform can show it. */
+    virtual void setClipboardTransferProgress(const ClipboardTransferProgress& progress) = 0;
+
+    //! Enables or disables showing the progress of clipboard transfers.
+    virtual void setClipboardStatusEnabled(bool enabled) = 0;
+
     //! Check clipboard owner
     /*!
     Check ownership of all clipboards and post grab events for any that

@@ -579,6 +579,10 @@ void MainWindow::start_cmd_app()
 
     args << "--name" << getScreenName();
 
+    if (!appConfig().getClipboardStatus()) {
+        args << "--no-clipboard-status";
+    }
+
     if (desktopMode)
     {
         cmd_app_process_ = new QProcess(this);

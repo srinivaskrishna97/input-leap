@@ -60,6 +60,7 @@ AppConfig::AppConfig(QSettings* settings) :
     m_AutoConfigPrompted(false),
     m_CryptoEnabled(false),
     m_AutoHide(false),
+    m_ClipboardStatus(true),
     m_AutoStart(false),
     m_MinimizeToTray(false)
 {
@@ -161,6 +162,7 @@ void AppConfig::loadSettings()
     // TODO: set default value of requireClientCertificate to true on InputLeap 3.0.0
     m_RequireClientCertificate = settings().value("requireClientCertificate", false).toBool();
     m_AutoHide = settings().value("autoHide", false).toBool();
+    m_ClipboardStatus = settings().value("clipboardStatus", true).toBool();
     m_AutoStart = settings().value("autoStart", false).toBool();
     m_MinimizeToTray = settings().value("minimizeToTray", false).toBool();
 }
@@ -185,6 +187,7 @@ void AppConfig::saveSettings()
     settings().setValue("cryptoEnabled", m_CryptoEnabled);
     settings().setValue("requireClientCertificate", m_RequireClientCertificate);
     settings().setValue("autoHide", m_AutoHide);
+    settings().setValue("clipboardStatus", m_ClipboardStatus);
     settings().setValue("autoStart", m_AutoStart);
     settings().setValue("minimizeToTray", m_MinimizeToTray);
     settings().sync();
@@ -235,6 +238,10 @@ bool AppConfig::getRequireClientCertificate() const { return m_RequireClientCert
 void AppConfig::setAutoHide(bool b) { m_AutoHide = b; }
 
 bool AppConfig::getAutoHide() { return m_AutoHide; }
+
+void AppConfig::setClipboardStatus(bool b) { m_ClipboardStatus = b; }
+
+bool AppConfig::getClipboardStatus() { return m_ClipboardStatus; }
 
 void AppConfig::setAutoStart(bool b) { m_AutoStart = b; }
 

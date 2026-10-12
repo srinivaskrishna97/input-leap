@@ -291,6 +291,11 @@ enum class EventType : std::uint32_t {
     */
     CLIPBOARD_DATA_UNAVAILABLE,
 
+    /*! This event is sent by a client proxy while clipboard contents arrive from the client.
+        The event data is a ClipboardTransferProgressInfo.
+    */
+    CLIPBOARD_TRANSFER_PROGRESS,
+
     /// This event is sent whenever a file chunk is transferred.
     FILE_CHUNK_SENDING,
 

@@ -22,6 +22,7 @@
 #include "platform/MSWindowsClipboardUTF16Converter.h"
 #include "platform/MSWindowsClipboardBitmapConverter.h"
 #include "platform/MSWindowsClipboardHTMLConverter.h"
+#include "platform/MSWindowsClipboardFileConverter.h"
 #include "platform/MSWindowsClipboardFacade.h"
 #include "arch/win32/ArchMiscWindows.h"
 #include "base/Log.h"
@@ -40,6 +41,7 @@ MSWindowsClipboard::MSWindowsClipboard(HWND window) :
     m_converters.push_back(new MSWindowsClipboardUTF16Converter);
     m_converters.push_back(new MSWindowsClipboardBitmapConverter);
     m_converters.push_back(new MSWindowsClipboardHTMLConverter);
+    m_converters.push_back(new MSWindowsClipboardFileConverter);
 }
 
 MSWindowsClipboard::~MSWindowsClipboard()
@@ -110,6 +112,9 @@ MSWindowsClipboard::add(EFormat format, const std::string& data)
             if (win32Data != nullptr) {
                 UINT win32Format = converter->getWin32Format();
                 m_facade->write(win32Data, win32Format);
+                if (format == kFiles) {
+                    addPreferredDropEffect();
+                }
             }
         }
     }
@@ -221,6 +226,25 @@ void MSWindowsClipboard::addDelayed(EFormat format)
         LOG_DEBUG("announce clipboard format: %d", format);
         SetClipboardData(win32Format, nullptr);
     }
+}
+
+void MSWindowsClipboard::addPreferredDropEffect()
+{
+    // tell Explorer to copy the files when they are pasted rather than to move them
+    const DWORD kDropEffectCopy = 1;
+    UINT format = RegisterClipboardFormatW(L"Preferred DropEffect");
+    HGLOBAL global = GlobalAlloc(GMEM_MOVEABLE | GMEM_DDESHARE, sizeof(DWORD));
+    if (format == 0 || global == nullptr) {
+        return;
+    }
+    DWORD* effect = static_cast<DWORD*>(GlobalLock(global));
+    if (effect == nullptr) {
+        GlobalFree(global);
+        return;
+    }
+    *effect = kDropEffectCopy;
+    GlobalUnlock(global);
+    m_facade->write(global, format);
 }
 
 void

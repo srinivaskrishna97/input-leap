@@ -171,6 +171,11 @@ void Screen::setClipboardOffer(ClipboardID id, const ClipboardOffer& offer)
     m_screen->setClipboardOffer(id, offer);
 }
 
+void Screen::setClipboardTransferProgress(const ClipboardTransferProgress& progress)
+{
+    m_screen->setClipboardTransferProgress(progress);
+}
+
 void Screen::clipboardDataUnavailable(ClipboardID id, const ClipboardOffer& offer)
 {
     m_screen->clipboardDataUnavailable(id, offer);

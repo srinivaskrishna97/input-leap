@@ -101,6 +101,21 @@ void PlatformScreenLoggingWrapper::clipboardDataUnavailable(ClipboardID id,
     LOG_DEBUG1("PlatformScreen::clipboardDataUnavailable() id=%d", id);
 }
 
+void PlatformScreenLoggingWrapper::setClipboardTransferProgress(
+    const ClipboardTransferProgress& progress)
+{
+    screen_->setClipboardTransferProgress(progress);
+    LOG_DEBUG2("PlatformScreen::setClipboardTransferProgress() %llu/%llu",
+               static_cast<unsigned long long>(progress.received),
+               static_cast<unsigned long long>(progress.total));
+}
+
+void PlatformScreenLoggingWrapper::setClipboardStatusEnabled(bool enabled)
+{
+    screen_->setClipboardStatusEnabled(enabled);
+    LOG_DEBUG1("PlatformScreen::setClipboardStatusEnabled() enabled=%d", enabled);
+}
+
 void PlatformScreenLoggingWrapper::checkClipboards()
 {
     LOG_DEBUG1("PlatformScreen::checkClipboards()");

@@ -118,6 +118,12 @@ public:
     */
     void clipboardDataUnavailable(ClipboardID, const ClipboardOffer& offer);
 
+    //! Show the progress of a clipboard transfer
+    /*!
+    See IPlatformScreen::setClipboardTransferProgress().
+    */
+    void setClipboardTransferProgress(const ClipboardTransferProgress& progress);
+
     //! Grab clipboard
     /*!
     Grabs (i.e. take ownership of) the system clipboard.

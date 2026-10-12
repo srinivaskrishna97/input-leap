@@ -17,6 +17,7 @@
  */
 
 #include "server/Server.h"
+#include "inputleap/IClipboard.h"
 
 #include "server/ClientProxy.h"
 #include "server/ClientProxyUnknown.h"
@@ -1765,6 +1766,16 @@ MarshalledClipboardPtr Server::findClipboardData(std::uint64_t hash) const
             return data;
         }
     }
+    // a client that cannot take files was offered the contents without them
+    for (ClipboardID id = 0; id < kClipboardEnd; ++id) {
+        const auto& data = m_clipboards[id].m_clipboardData;
+        if (data) {
+            auto stripped = without_clipboard_formats(data, 1u << IClipboard::kFiles);
+            if (stripped->hash() == hash) {
+                return stripped;
+            }
+        }
+    }
     return nullptr;
 }
 
@@ -2305,6 +2316,8 @@ Server::addClient(BaseClientProxy* client)
                           [this, client](const auto& e){
                               handle_clipboard_data_unavailable(e, client);
                           });
+    m_events->add_handler(EventType::CLIPBOARD_TRANSFER_PROGRESS, client->get_event_target(),
+                          [this](const auto& e){ handle_clipboard_transfer_progress(e); });
 
 	// add to list
 	m_clientSet.insert(client);
@@ -2337,6 +2350,7 @@ Server::removeClient(BaseClientProxy* client)
     m_events->remove_handler(EventType::CLIPBOARD_OFFERED, client->get_event_target());
     m_events->remove_handler(EventType::CLIPBOARD_DATA_REQUESTED, client->get_event_target());
     m_events->remove_handler(EventType::CLIPBOARD_DATA_UNAVAILABLE, client->get_event_target());
+    m_events->remove_handler(EventType::CLIPBOARD_TRANSFER_PROGRESS, client->get_event_target());
 
 	// remove from list
 	m_clients.erase(getName(client));
@@ -2542,6 +2556,21 @@ void Server::dragInfoReceived(std::uint32_t fileNum, std::string content)
 	DragInformation::parseDragInfo(m_fakeDragFileList, fileNum, content);
 
 	m_screen->startDraggingFiles(m_fakeDragFileList);
+}
+
+void Server::handle_clipboard_transfer_progress(const Event& event)
+{
+    const auto& info = event.get_data_as<ClipboardTransferProgressInfo>();
+
+    // the offer tells what kind of contents are arriving
+    ClipboardTransferProgress progress = info.progress;
+    for (ClipboardID id = 0; id < kClipboardEnd; ++id) {
+        if (m_clipboards[id].m_clipboardOffer.hash == info.hash) {
+            progress.formats = m_clipboards[id].m_clipboardOffer.formats;
+            break;
+        }
+    }
+    m_primaryClient->setClipboardTransferProgress(progress);
 }
 
 } // namespace inputleap

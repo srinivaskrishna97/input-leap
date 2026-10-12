@@ -51,6 +51,7 @@ SettingsDialog::SettingsDialog(QWidget* parent, AppConfig& config) :
     ui_->m_pLineEditLogFilename->setText(app_config_.logFilename());
     setIndexFromItemData(ui_->m_pComboLanguage, app_config_.language());
     ui_->m_pCheckBoxAutoHide->setChecked(app_config_.getAutoHide());
+    ui_->m_pCheckBoxClipboardStatus->setChecked(app_config_.getClipboardStatus());
     ui_->m_pCheckBoxAutoStart->setChecked(app_config_.getAutoStart());
     ui_->m_pCheckBoxMinimizeToTray->setChecked(app_config_.getMinimizeToTray());
     ui_->m_pCheckBoxEnableCrypto->setChecked(app_config_.getCryptoEnabled());
@@ -88,6 +89,7 @@ void SettingsDialog::accept()
     app_config_.setLanguage(ui_->m_pComboLanguage->itemData(ui_->m_pComboLanguage->currentIndex()).toString());
     app_config_.setElevateMode(static_cast<ElevateMode>(ui_->m_pComboElevate->currentIndex()));
     app_config_.setAutoHide(ui_->m_pCheckBoxAutoHide->isChecked());
+    app_config_.setClipboardStatus(ui_->m_pCheckBoxClipboardStatus->isChecked());
     app_config_.setAutoStart(ui_->m_pCheckBoxAutoStart->isChecked());
     app_config_.setMinimizeToTray(ui_->m_pCheckBoxMinimizeToTray->isChecked());
     app_config_.saveSettings();

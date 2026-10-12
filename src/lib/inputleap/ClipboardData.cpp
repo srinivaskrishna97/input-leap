@@ -138,6 +138,39 @@ bool same_clipboard_contents(const MarshalledClipboardPtr& a, const MarshalledCl
     return a->same_contents(*b);
 }
 
+MarshalledClipboardPtr without_clipboard_formats(const MarshalledClipboardPtr& data,
+                                                 std::uint32_t formats)
+{
+    using namespace clipboard_data_detail;
+
+    if (!data || (marshalled_clipboard_formats(data->data()) & formats) == 0) {
+        return data;
+    }
+
+    // see IClipboard::marshall() for the format; it was validated by
+    // marshalled_clipboard_formats() above
+    const std::string& in = data->data();
+    const auto* p = reinterpret_cast<const unsigned char*>(in.data());
+    std::uint32_t count = load_be32(p);
+    std::size_t pos = 4;
+    std::string out(4, '\0');
+    std::uint32_t kept = 0;
+    for (std::uint32_t i = 0; i < count; ++i) {
+        std::uint32_t format = load_be32(p + pos);
+        std::uint32_t format_size = load_be32(p + pos + 4);
+        if (format >= 32 || (formats & (1u << format)) == 0) {
+            out.append(in, pos, 8 + format_size);
+            ++kept;
+        }
+        pos += 8 + format_size;
+    }
+    out[0] = static_cast<char>((kept >> 24) & 0xff);
+    out[1] = static_cast<char>((kept >> 16) & 0xff);
+    out[2] = static_cast<char>((kept >> 8) & 0xff);
+    out[3] = static_cast<char>(kept & 0xff);
+    return make_marshalled_clipboard(std::move(out));
+}
+
 std::uint32_t marshalled_clipboard_formats(const std::string& data)
 {
     using namespace clipboard_data_detail;

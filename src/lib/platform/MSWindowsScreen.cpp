@@ -23,6 +23,7 @@
 #include "client/Client.h"
 #include "platform/MSWindowsClipboard.h"
 #include "platform/MSWindowsClipboardWorker.h"
+#include "platform/MSWindowsClipboardStatusWindow.h"
 #include "platform/MSWindowsDesks.h"
 #include "platform/MSWindowsEventQueueBuffer.h"
 #include "platform/MSWindowsKeyState.h"
@@ -459,6 +460,25 @@ void MSWindowsScreen::setClipboardOffer(ClipboardID, const ClipboardOffer& offer
 void MSWindowsScreen::clipboardDataUnavailable(ClipboardID, const ClipboardOffer& offer)
 {
     m_clipboardWorker->offer_unavailable(offer);
+}
+
+void MSWindowsScreen::setClipboardTransferProgress(const ClipboardTransferProgress& progress)
+{
+    if (!m_clipboardStatusEnabled) {
+        return;
+    }
+    if (!m_clipboardStatus) {
+        m_clipboardStatus = std::make_unique<MSWindowsClipboardStatusWindow>();
+    }
+    m_clipboardStatus->update(progress);
+}
+
+void MSWindowsScreen::setClipboardStatusEnabled(bool enabled)
+{
+    m_clipboardStatusEnabled = enabled;
+    if (!enabled) {
+        m_clipboardStatus.reset();
+    }
 }
 
 void MSWindowsScreen::handle_clipboard_data_needed(const Event& event)

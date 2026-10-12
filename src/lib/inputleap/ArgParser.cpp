@@ -433,6 +433,9 @@ ArgParser::parseGenericArgs(Argv& argv)
     else if (argv.shift("--drop-dir")) {
         argsBase().m_dropTarget = argv.shift();
     }
+    else if (argv.shift("--no-clipboard-status")) {
+        argsBase().m_clipboardStatus = false;
+    }
     else if (argv.shift("--enable-crypto")) {
         LOG_INFO("--enable-crypto is used by default. The option is deprecated.");
     }

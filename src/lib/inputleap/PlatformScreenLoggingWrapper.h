@@ -39,6 +39,8 @@ public:
     bool supportsClipboardOffers() const override;
     void setClipboardOffer(ClipboardID id, const ClipboardOffer& offer) override;
     void clipboardDataUnavailable(ClipboardID id, const ClipboardOffer& offer) override;
+    void setClipboardTransferProgress(const ClipboardTransferProgress& progress) override;
+    void setClipboardStatusEnabled(bool enabled) override;
     void checkClipboards() override;
     void openScreensaver(bool notify) override;
     void closeScreensaver() override;

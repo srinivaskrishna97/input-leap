@@ -91,6 +91,7 @@ public:
 
 private:
     void clearConverters();
+    void addPreferredDropEffect();
 
     UINT convertFormatToWin32(EFormat) const;
     HANDLE convertTextToWin32(const std::string& data) const;

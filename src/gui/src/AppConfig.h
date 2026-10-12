@@ -94,6 +94,8 @@ class AppConfig: public QObject
 
         void setAutoHide(bool b);
         bool getAutoHide();
+        void setClipboardStatus(bool b);
+        bool getClipboardStatus();
 
         void setAutoStart(bool b);
         bool getAutoStart();
@@ -135,6 +137,7 @@ protected:
         bool m_CryptoEnabled;
         bool m_RequireClientCertificate = false;
         bool m_AutoHide;
+        bool m_ClipboardStatus;
         bool m_AutoStart;
         bool m_MinimizeToTray;
 

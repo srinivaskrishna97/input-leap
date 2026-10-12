@@ -491,9 +491,18 @@ void ServerProxy::clipboardData()
     }
 
     auto status = m_clipboardReceiver.add(mark, data);
+
+    ClipboardTransferProgress progress;
+    progress.received = m_clipboardReceiver.received();
+    progress.total = m_clipboardReceiver.expected();
     if (status == ClipboardTransferReceiver::Status::InProgress) {
+        m_client->clipboardTransferProgress(m_clipboardReceiver.header().hash, progress);
         return;
     }
+    progress.state = status == ClipboardTransferReceiver::Status::Complete
+                         ? ClipboardTransferProgress::State::Completed
+                         : ClipboardTransferProgress::State::Failed;
+    m_client->clipboardTransferProgress(m_clipboardReceiver.header().hash, progress);
 
     if (status == ClipboardTransferReceiver::Status::Complete) {
         auto contents = m_clipboardReceiver.take();

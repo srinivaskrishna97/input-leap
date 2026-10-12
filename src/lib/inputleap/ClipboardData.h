@@ -88,6 +88,11 @@ bool same_clipboard_contents(const MarshalledClipboardPtr& a, const MarshalledCl
 /// (1 << IClipboard::EFormat) set for each format. Malformed data yields 0.
 std::uint32_t marshalled_clipboard_formats(const std::string& data);
 
+/*! Returns the contents without the formats in \p formats (a bit per IClipboard::EFormat),
+    or \p data itself if it has none of them. */
+MarshalledClipboardPtr without_clipboard_formats(const MarshalledClipboardPtr& data,
+                                                 std::uint32_t formats);
+
 /*! Describes clipboard contents without the contents themselves. Used to announce the contents
     of a clipboard so that they are transferred only when needed.
 */

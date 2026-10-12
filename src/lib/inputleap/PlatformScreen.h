@@ -75,6 +75,8 @@ public:
     MarshalledClipboardPtr getClipboardSnapshot(ClipboardID) const override { return nullptr; }
     bool supportsClipboardOffers() const override { return false; }
     void setClipboardOffer(ClipboardID, const ClipboardOffer&) override { }
+    void setClipboardTransferProgress(const ClipboardTransferProgress&) override { }
+    void setClipboardStatusEnabled(bool) override { }
     void clipboardDataUnavailable(ClipboardID, const ClipboardOffer&) override { }
 
 protected:
