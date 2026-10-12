@@ -1,1 +1,1 @@
-The clipboard can carry files: files and folders copied in Explorer on one computer can be pasted into Explorer on another. They are transferred when they are pasted.
+The clipboard can carry files: files and folders copied in Explorer on one computer can be pasted into Explorer on another. They are transferred when they are pasted. On Windows the InputLeap window (tray icon) has to be running, as it reads the list of copied files on behalf of the service.

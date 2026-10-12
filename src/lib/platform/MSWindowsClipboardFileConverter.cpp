@@ -32,9 +32,6 @@ namespace inputleap {
 
 namespace {
 
-// Files that together are larger than this are not put on the clipboard
-const std::uint64_t kClipboardFilesMaxBytes = 256ull * 1024 * 1024;
-
 // How many sets of received files are kept; older ones are removed when new ones arrive.
 const std::size_t kKeptReceivedFileSets = 3;
 

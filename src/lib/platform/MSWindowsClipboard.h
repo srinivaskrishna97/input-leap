@@ -89,9 +89,18 @@ public:
     */
     void addDelayed(EFormat format);
 
+    //! Tell Explorer to copy pasted files
+    /*!
+    Adds the "Preferred DropEffect" format, which tells Explorer to copy rather than move
+    files that are pasted.  Used when files are put on the clipboard.
+    */
+    void addPreferredDropEffect();
+
+    //! The win32 format of the preferred drop effect
+    static UINT preferredDropEffectFormat();
+
 private:
     void clearConverters();
-    void addPreferredDropEffect();
 
     UINT convertFormatToWin32(EFormat) const;
     HANDLE convertTextToWin32(const std::string& data) const;

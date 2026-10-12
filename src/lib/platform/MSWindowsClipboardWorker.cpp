@@ -18,10 +18,12 @@
 
 #include "platform/MSWindowsClipboard.h"
 #include "inputleap/Clipboard.h"
+#include "inputleap/ClipboardFiles.h"
 #include "base/IEventQueue.h"
 #include "base/Log.h"
 
 #include <chrono>
+#include <cstring>
 #include <future>
 
 namespace inputleap {
@@ -47,6 +49,9 @@ const UINT kClipboardCaptureDelayMs = 100;
 const UINT kClipboardRetryDelayMs = 50;
 const int kClipboardMaxCaptureRetries = 40;
 const int kClipboardMaxApplyRetries = 40;
+
+// Identifies the file lists that the GUI sends with WM_COPYDATA, see ClipboardFileForwarder
+const ULONG_PTR kClipboardFileListMagic = 0x494C4650; // "ILFP"
 
 // How long a pasting application waits for offered contents to arrive from another screen:
 // a fixed time plus an allowance that grows with the size of the contents.
@@ -175,6 +180,10 @@ LRESULT MSWindowsClipboardWorker::handle_message(UINT msg, WPARAM wparam, LPARAM
         }
         return 0;
 
+    case WM_COPYDATA:
+        // the GUI, which runs as the user, sends the paths of the files on the clipboard
+        return on_copy_data(reinterpret_cast<const COPYDATASTRUCT*>(lparam)) ? TRUE : FALSE;
+
     case WM_RENDERFORMAT:
         // an application requests the data of offered contents
         render_format(static_cast<UINT>(wparam));
@@ -204,6 +213,57 @@ LRESULT MSWindowsClipboardWorker::handle_message(UINT msg, WPARAM wparam, LPARAM
         break;
     }
     return DefWindowProcW(window_, msg, wparam, lparam);
+}
+
+bool MSWindowsClipboardWorker::on_copy_data(const COPYDATASTRUCT* data)
+{
+    if (data == nullptr || data->dwData != kClipboardFileListMagic || data->lpData == nullptr ||
+        data->cbData < sizeof(DWORD)) {
+        return false;
+    }
+
+    DWORD sequence = 0;
+    std::memcpy(&sequence, data->lpData, sizeof(DWORD));
+
+    // the paths, each terminated by a null and the list by another one
+    const auto* chars = reinterpret_cast<const wchar_t*>(
+        static_cast<const char*>(data->lpData) + sizeof(DWORD));
+    std::size_t count = (data->cbData - sizeof(DWORD)) / sizeof(wchar_t);
+    std::vector<fs::path> paths;
+    std::wstring current;
+    for (std::size_t i = 0; i < count; ++i) {
+        if (chars[i] != L'\0') {
+            current.push_back(chars[i]);
+        } else if (current.empty()) {
+            break;
+        } else {
+            paths.emplace_back(current);
+            current.clear();
+        }
+    }
+    if (paths.empty()) {
+        return false;
+    }
+    LOG_DEBUG("received %zu file paths from the GUI for clipboard sequence %lu", paths.size(),
+              static_cast<unsigned long>(sequence));
+
+    if (MSWindowsClipboard::is_owned_by_us()) {
+        // the files came from another screen
+        return true;
+    }
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        user_files_ = std::move(paths);
+        user_files_sequence_ = sequence;
+        // a snapshot taken without the files has to be replaced
+        if (snapshot_ && snapshot_sequence_ == sequence) {
+            snapshot_.reset();
+        }
+        capture_pending_ = true;
+    }
+    capture_retries_ = 0;
+    schedule_capture(kClipboardCaptureDelayMs);
+    return true;
 }
 
 void MSWindowsClipboardWorker::post(UINT msg)
@@ -459,6 +519,10 @@ bool MSWindowsClipboardWorker::offer_now(const ClipboardOffer& offer,
             clipboard.addDelayed(static_cast<IClipboard::EFormat>(format));
         }
     }
+    if ((offer.formats & (1u << IClipboard::kFiles)) != 0) {
+        // tells Explorer to copy, rather than move, the files when they are pasted
+        SetClipboardData(MSWindowsClipboard::preferredDropEffectFormat(), nullptr);
+    }
     {
         std::lock_guard<std::mutex> lock(mutex_);
         offer_ = OfferState{};
@@ -527,6 +591,10 @@ MarshalledClipboardPtr MSWindowsClipboardWorker::wait_for_offer_data()
 void MSWindowsClipboardWorker::render_format(UINT win32_format)
 {
     MSWindowsClipboard clipboard(window_);
+    if (win32_format == MSWindowsClipboard::preferredDropEffectFormat()) {
+        clipboard.addPreferredDropEffect();
+        return;
+    }
     IClipboard::EFormat format;
     if (!clipboard.getFormatForWin32(win32_format, format)) {
         return;
@@ -580,6 +648,9 @@ void MSWindowsClipboardWorker::render_all_formats()
                     clipboard.add(eformat, contents.get(eformat));
                 }
             }
+            if ((formats & (1u << IClipboard::kFiles)) != 0) {
+                clipboard.addPreferredDropEffect();
+            }
             contents.close();
         }
     }
@@ -622,6 +693,28 @@ void MSWindowsClipboardWorker::capture_now()
         std::lock_guard<std::mutex> lock(mutex_);
         capture_pending_ = false;
         return;
+    }
+
+    // Windows hides file lists from this process when it has higher privileges than the
+    // application that copied the files, which is the case when the service started it.  The
+    // GUI, which runs as the user, sends the paths of the files instead.
+    std::vector<fs::path> user_files;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (user_files_sequence_ == sequence) {
+            user_files = user_files_;
+        }
+    }
+    if (!user_files.empty() && clipboard.open(0)) {
+        if (!clipboard.has(IClipboard::kFiles)) {
+            std::string files;
+            if (read_clipboard_files(user_files, kClipboardFilesMaxBytes, files)) {
+                clipboard.add(IClipboard::kFiles, files);
+                LOG_INFO("files on clipboard: %zu items, %zu bytes (paths from the GUI)",
+                         user_files.size(), files.size());
+            }
+        }
+        clipboard.close();
     }
 
     auto data = marshall_clipboard(clipboard);

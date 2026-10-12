@@ -18,6 +18,7 @@
 
 #include "base/EventTarget.h"
 #include "inputleap/ClipboardData.h"
+#include "io/filesystem.h"
 
 #define WIN32_LEAN_AND_MEAN
 #include <Windows.h>
@@ -26,6 +27,7 @@
 #include <deque>
 #include <mutex>
 #include <thread>
+#include <vector>
 
 namespace inputleap {
 
@@ -124,6 +126,7 @@ private:
     void thread_main();
     static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam);
     LRESULT handle_message(UINT msg, WPARAM wparam, LPARAM lparam);
+    bool on_copy_data(const COPYDATASTRUCT* data);
 
     void post(UINT msg);
     void enqueue(Command command);
@@ -153,6 +156,11 @@ private:
     DWORD snapshot_sequence_ = 0;
     bool capture_pending_ = false;
     OfferState offer_;
+
+    // the paths of the files on the clipboard, sent by the GUI, and the clipboard sequence
+    // number they belong to
+    std::vector<fs::path> user_files_;
+    DWORD user_files_sequence_ = 0;
 
     // state used only on the worker thread
     MarshalledClipboardPtr last_applied_;

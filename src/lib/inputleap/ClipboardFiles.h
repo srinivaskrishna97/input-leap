@@ -28,6 +28,9 @@ namespace inputleap {
 /// At most this many files and directories are put on the clipboard.
 constexpr std::size_t kClipboardFilesMaxEntries = 10000;
 
+/// Files that together are larger than this are not put on the clipboard.
+constexpr std::uint64_t kClipboardFilesMaxBytes = 256ull * 1024 * 1024;
+
 /*! An entry of a file list on the clipboard: a file or a directory. Paths are relative to the
     list, use '/' as separator and cannot leave the list, see ClipboardFileList::is_safe_path().
 */

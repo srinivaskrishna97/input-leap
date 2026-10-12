@@ -26,6 +26,7 @@ set(GUI_SOURCE_FILES
     src/ActionDialog.cpp
     src/AddClientDialog.cpp
     src/AppConfig.cpp
+    src/ClipboardFileForwarder.cpp
     src/AppLocale.cpp
     src/BaseConfig.cpp
     src/CommandProcess.cpp
@@ -64,6 +65,7 @@ set(GUI_HEADER_FILES
     src/ActionDialog.h
     src/AddClientDialog.h
     src/AppConfig.h
+    src/ClipboardFileForwarder.h
     src/AppConnectionState.h
     src/AppLocale.h
     src/BaseConfig.h

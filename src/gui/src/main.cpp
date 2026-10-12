@@ -20,6 +20,7 @@
 #define TRAY_RETRY_WAIT 2000
 
 #include "QInputLeapApplication.h"
+#include "ClipboardFileForwarder.h"
 #include "MainWindow.h"
 #include "AppConfig.h"
 #include "SetupWizard.h"
@@ -135,6 +136,7 @@ int main(int argc, char* argv[])
 	app.switchTranslator(appConfig.language());
 
 	MainWindow mainWindow(settings, appConfig);
+	ClipboardFileForwarder clipboardFileForwarder;
 	SetupWizard setupWizard(mainWindow, true);
 
 	if (appConfig.wizardShouldRun())

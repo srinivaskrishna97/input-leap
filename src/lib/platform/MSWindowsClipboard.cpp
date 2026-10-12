@@ -228,11 +228,17 @@ void MSWindowsClipboard::addDelayed(EFormat format)
     }
 }
 
+UINT MSWindowsClipboard::preferredDropEffectFormat()
+{
+    static const UINT format = RegisterClipboardFormatW(L"Preferred DropEffect");
+    return format;
+}
+
 void MSWindowsClipboard::addPreferredDropEffect()
 {
     // tell Explorer to copy the files when they are pasted rather than to move them
     const DWORD kDropEffectCopy = 1;
-    UINT format = RegisterClipboardFormatW(L"Preferred DropEffect");
+    UINT format = preferredDropEffectFormat();
     HGLOBAL global = GlobalAlloc(GMEM_MOVEABLE | GMEM_DDESHARE, sizeof(DWORD));
     if (format == 0 || global == nullptr) {
         return;
