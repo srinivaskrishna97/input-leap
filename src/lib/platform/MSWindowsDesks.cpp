@@ -30,6 +30,7 @@
 
 #include <malloc.h>
 #include <VersionHelpers.h>
+#include <chrono>
 
 namespace inputleap {
 
@@ -118,11 +119,13 @@ MSWindowsDesks::MSWindowsDesks(bool isPrimary, bool noHooks,
     m_deskClass = createDeskWindowClass(m_isPrimary);
     m_keyLayout = GetKeyboardLayout(GetCurrentThreadId());
     resetOptions();
+    startForegroundThread();
 }
 
 MSWindowsDesks::~MSWindowsDesks()
 {
     disable();
+    stopForegroundThread();
     destroyClass(m_deskClass);
     destroyCursor(m_cursor);
 }
@@ -517,13 +520,9 @@ MSWindowsDesks::deskEnter(Desk* desk)
     // (mouse over activation) but i've no idea how to do that.
     // the obvious workaround of using SetWindowPos() to move it back
     // after being raised doesn't work.
-    DWORD thisThread =
-        GetWindowThreadProcessId(desk->m_window, nullptr);
-    DWORD thatThread =
-        GetWindowThreadProcessId(desk->m_foregroundWindow, nullptr);
-    AttachThreadInput(thatThread, thisThread, TRUE);
-    SetForegroundWindow(desk->m_foregroundWindow);
-    AttachThreadInput(thatThread, thisThread, FALSE);
+    if (desk->m_foregroundWindow != nullptr) {
+        requestForegroundWindow(desk->m_foregroundWindow, desk->m_foregroundWindow);
+    }
     EnableWindow(desk->m_window, FALSE);
     desk->m_foregroundWindow = nullptr;
 }
@@ -558,13 +557,7 @@ MSWindowsDesks::deskLeave(Desk* desk, HKL keyLayout)
         if (desk->m_foregroundWindow != nullptr) {
             EnableWindow(desk->m_window, TRUE);
             SetActiveWindow(desk->m_window);
-            DWORD thisThread =
-                GetWindowThreadProcessId(desk->m_window, nullptr);
-            DWORD thatThread =
-                GetWindowThreadProcessId(desk->m_foregroundWindow, nullptr);
-            AttachThreadInput(thatThread, thisThread, TRUE);
-            SetForegroundWindow(desk->m_window);
-            AttachThreadInput(thatThread, thisThread, FALSE);
+            requestForegroundWindow(desk->m_window, desk->m_foregroundWindow);
         }
 
         // switch to requested keyboard layout
@@ -643,16 +636,26 @@ void MSWindowsDesks::desk_thread(Desk* desk)
             }
             break;
 
-        case INPUTLEAP_MSG_ENTER:
+        case INPUTLEAP_MSG_ENTER: {
+            auto start = std::chrono::steady_clock::now();
             m_isOnScreen = true;
             deskEnter(desk);
+            LOG_DEBUG1("desk enter took %lld ms", static_cast<long long>(
+                std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::steady_clock::now() - start).count()));
             break;
+        }
 
-        case INPUTLEAP_MSG_LEAVE:
+        case INPUTLEAP_MSG_LEAVE: {
+            auto start = std::chrono::steady_clock::now();
             m_isOnScreen = false;
             m_keyLayout  = (HKL)msg.wParam;
             deskLeave(desk, m_keyLayout);
+            LOG_DEBUG1("desk leave took %lld ms", static_cast<long long>(
+                std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::steady_clock::now() - start).count()));
             break;
+        }
 
         case INPUTLEAP_MSG_FAKE_KEY:
             keybd_event(HIBYTE(msg.lParam), LOBYTE(msg.lParam), (DWORD)msg.wParam, 0);
@@ -891,6 +894,80 @@ std::string MSWindowsDesks::getDesktopName(HDESK desk)
         std::string result(name);
         return result;
     }
+}
+
+void MSWindowsDesks::startForegroundThread()
+{
+    foreground_thread_ = std::thread([this]() { foreground_thread_main(); });
+}
+
+void MSWindowsDesks::stopForegroundThread()
+{
+    {
+        std::lock_guard<std::mutex> lock(foreground_mutex_);
+        foreground_quit_ = true;
+    }
+    foreground_cv_.notify_all();
+    if (foreground_thread_.joinable()) {
+        foreground_thread_.join();
+    }
+}
+
+void MSWindowsDesks::requestForegroundWindow(HWND window, HWND attachTo)
+{
+    {
+        std::lock_guard<std::mutex> lock(foreground_mutex_);
+        // only the latest request matters
+        foreground_target_ = window;
+        foreground_attach_to_ = attachTo;
+        foreground_pending_ = true;
+    }
+    foreground_cv_.notify_all();
+}
+
+void MSWindowsDesks::foreground_thread_main()
+{
+    // AttachThreadInput() needs a message queue, which a thread gets on its first call to a
+    // window function
+    MSG msg;
+    PeekMessage(&msg, nullptr, 0, 0, PM_NOREMOVE);
+
+    std::unique_lock<std::mutex> lock(foreground_mutex_);
+    while (true) {
+        foreground_cv_.wait(lock, [this]() { return foreground_quit_ || foreground_pending_; });
+        if (foreground_quit_) {
+            return;
+        }
+        HWND window = foreground_target_;
+        HWND attachTo = foreground_attach_to_;
+        foreground_pending_ = false;
+        lock.unlock();
+        setForegroundWindowNow(window, attachTo);
+        lock.lock();
+    }
+}
+
+void MSWindowsDesks::setForegroundWindowNow(HWND window, HWND attachTo)
+{
+    if (window == nullptr || !IsWindow(window)) {
+        return;
+    }
+    auto start = std::chrono::steady_clock::now();
+
+    // attaching to the input of the other application's thread grants the right to change
+    // the foreground window
+    DWORD thisThread = GetCurrentThreadId();
+    DWORD thatThread = attachTo != nullptr ? GetWindowThreadProcessId(attachTo, nullptr) : 0;
+    bool attached = thatThread != 0 && thatThread != thisThread &&
+                    AttachThreadInput(thatThread, thisThread, TRUE) != 0;
+    SetForegroundWindow(window);
+    if (attached) {
+        AttachThreadInput(thatThread, thisThread, FALSE);
+    }
+
+    LOG_DEBUG1("foreground window changed in %lld ms", static_cast<long long>(
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - start).count()));
 }
 
 HWND

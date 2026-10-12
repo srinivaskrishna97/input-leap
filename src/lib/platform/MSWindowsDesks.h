@@ -29,6 +29,7 @@
 #include <functional>
 #include <mutex>
 #include <string>
+#include <thread>
 
 #define WIN32_LEAN_AND_MEAN
 #include <Windows.h>
@@ -219,6 +220,11 @@ private:
     void deskMouseRelativeMove(std::int32_t dx, std::int32_t dy) const;
     void deskEnter(Desk* desk);
     void deskLeave(Desk* desk, HKL keyLayout);
+    void startForegroundThread();
+    void stopForegroundThread();
+    void foreground_thread_main();
+    void requestForegroundWindow(HWND window, HWND attachTo);
+    static void setForegroundWindowNow(HWND window, HWND attachTo);
     void desk_thread(Desk* desk);
 
     // desk switch checking and handling
@@ -295,6 +301,17 @@ private:
 
     // true if program should stop on desk switch.
     bool m_stopOnDeskSwitch;
+
+    // Changing the foreground window waits for the application that loses it to respond,
+    // so it is done on its own thread.  On the desk thread, which handles all input, it
+    // would stall the cursor whenever that application is busy.
+    std::thread foreground_thread_;
+    std::mutex foreground_mutex_;
+    std::condition_variable foreground_cv_;
+    bool foreground_quit_ = false;
+    bool foreground_pending_ = false;
+    HWND foreground_target_ = nullptr;
+    HWND foreground_attach_to_ = nullptr;
 };
 
 } // namespace inputleap
