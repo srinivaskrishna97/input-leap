@@ -483,7 +483,12 @@ jobs:
 
       - name: Run build system
         run: |
-          cmake --build build --config $env:B_BUILD_TYPE --target install
+          cmake --build build --config $env:B_BUILD_TYPE --target install 2>&1 | Tee-Object -FilePath build.log
+          if ($LASTEXITCODE -ne 0) {
+            # the job logs need a login to read, so show the compiler's errors as annotations
+            Select-String -Path build.log -Pattern 'error C\d+|error LNK\d+|fatal error|error MSB' | Select-Object -First 15 | ForEach-Object { "::error::$($_.Line.Trim())" }
+            exit $LASTEXITCODE
+          }
 
       - name: Create Archive
         run: Compress-Archive -Path build\input-leap-install\* -DestinationPath ${{ env.B_BUILD_TYPE }}.zip

@@ -20,6 +20,8 @@
 #include "base/Log.h"
 
 #include <cstdio>
+#include <cstring>
+#include <cwchar>
 #include <future>
 
 namespace inputleap {
@@ -28,28 +30,28 @@ namespace {
 
 const wchar_t* const kStatusWindowClassName = L"InputLeapClipboardStatus";
 
-const UINT kMsgUpdate = WM_APP + 1;
-const UINT_PTR kShowTimer = 1;
-const UINT_PTR kHideTimer = 2;
+const UINT kStatusMsgUpdate = WM_APP + 1;
+const UINT_PTR kStatusShowTimer = 1;
+const UINT_PTR kStatusHideTimer = 2;
 
 // a transfer must take at least this long before the box appears
-const UINT kShowDelayMs = 500;
+const UINT kStatusShowDelayMs = 500;
 // how long a failure stays on the screen
-const UINT kFailureDisplayMs = 2500;
+const UINT kStatusFailureDisplayMs = 2500;
 // the box is repainted at most this often
-const std::chrono::milliseconds kPaintInterval(80);
+const std::chrono::milliseconds kStatusPaintInterval(80);
 
 // size and placement in pixels at 96 dpi
-const int kWidth = 340;
-const int kHeight = 78;
-const int kMargin = 16;
-const int kPadding = 14;
-const int kBarHeight = 6;
+const int kStatusWidth = 340;
+const int kStatusHeight = 78;
+const int kStatusMargin = 16;
+const int kStatusPadding = 14;
+const int kStatusBarHeight = 6;
 
 std::once_flag g_status_window_class_once;
 ATOM g_status_window_class = 0;
 
-std::wstring format_bytes(std::uint64_t bytes)
+std::wstring status_format_bytes(std::uint64_t bytes)
 {
     wchar_t text[32];
     if (bytes >= 1024ull * 1024 * 1024) {
@@ -62,7 +64,7 @@ std::wstring format_bytes(std::uint64_t bytes)
     return text;
 }
 
-const wchar_t* title_for(const ClipboardTransferProgress& progress)
+const wchar_t* status_title_for(const ClipboardTransferProgress& progress)
 {
     const std::uint32_t images = (1u << IClipboard::kBitmap) | (1u << IClipboard::kPNG) |
                                  (1u << IClipboard::kJpeg) | (1u << IClipboard::kTiff) |
@@ -79,7 +81,7 @@ const wchar_t* title_for(const ClipboardTransferProgress& progress)
     return L"Receiving the clipboard from another screen";
 }
 
-HFONT make_font(int points, int dpi, bool bold)
+HFONT status_make_font(int points, int dpi, bool bold)
 {
     LOGFONTW font = {};
     font.lfHeight = -MulDiv(points, dpi, 72);
@@ -127,7 +129,7 @@ void MSWindowsClipboardStatusWindow::update(const ClipboardTransferProgress& pro
         std::lock_guard<std::mutex> lock(mutex_);
         latest_ = progress;
     }
-    PostMessageW(window_, kMsgUpdate, 0, 0);
+    PostMessageW(window_, kStatusMsgUpdate, 0, 0);
 }
 
 bool MSWindowsClipboardStatusWindow::create_window()
@@ -156,14 +158,14 @@ bool MSWindowsClipboardStatusWindow::create_window()
     if (dpi_ <= 0) {
         dpi_ = 96;
     }
-    title_font_ = make_font(10, dpi_, true);
-    text_font_ = make_font(9, dpi_, false);
+    title_font_ = status_make_font(10, dpi_, true);
+    text_font_ = status_make_font(9, dpi_, false);
 
     // never activated, always on top, not in the task bar, translucent, and clicks go through
     window_ = CreateWindowExW(WS_EX_TOPMOST | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW |
                               WS_EX_LAYERED | WS_EX_TRANSPARENT,
                               kStatusWindowClassName, L"InputLeap clipboard transfer", WS_POPUP,
-                              0, 0, scale(kWidth), scale(kHeight), nullptr, nullptr, instance, this);
+                              0, 0, scale(kStatusWidth), scale(kStatusHeight), nullptr, nullptr, instance, this);
     if (window_ == nullptr) {
         return false;
     }
@@ -208,18 +210,18 @@ LRESULT CALLBACK MSWindowsClipboardStatusWindow::wnd_proc(HWND hwnd, UINT msg, W
 LRESULT MSWindowsClipboardStatusWindow::handle_message(UINT msg, WPARAM wparam, LPARAM lparam)
 {
     switch (msg) {
-    case kMsgUpdate:
+    case kStatusMsgUpdate:
         on_update();
         return 0;
 
     case WM_TIMER:
-        if (wparam == kShowTimer) {
-            KillTimer(window_, kShowTimer);
+        if (wparam == kStatusShowTimer) {
+            KillTimer(window_, kStatusShowTimer);
             if (transfer_active_) {
                 show();
             }
-        } else if (wparam == kHideTimer) {
-            KillTimer(window_, kHideTimer);
+        } else if (wparam == kStatusHideTimer) {
+            KillTimer(window_, kStatusHideTimer);
             hide();
         }
         return 0;
@@ -238,8 +240,8 @@ LRESULT MSWindowsClipboardStatusWindow::handle_message(UINT msg, WPARAM wparam, 
         return 1;
 
     case WM_CLOSE:
-        KillTimer(window_, kShowTimer);
-        KillTimer(window_, kHideTimer);
+        KillTimer(window_, kStatusShowTimer);
+        KillTimer(window_, kStatusHideTimer);
         DestroyWindow(window_);
         return 0;
 
@@ -267,10 +269,10 @@ void MSWindowsClipboardStatusWindow::on_update()
         if (!transfer_active_) {
             transfer_active_ = true;
             started_ = now;
-            SetTimer(window_, kShowTimer, kShowDelayMs, nullptr);
+            SetTimer(window_, kStatusShowTimer, kStatusShowDelayMs, nullptr);
         }
         shown_ = progress;
-        if (visible_ && now - painted_ >= kPaintInterval) {
+        if (visible_ && now - painted_ >= kStatusPaintInterval) {
             painted_ = now;
             InvalidateRect(window_, nullptr, FALSE);
         }
@@ -278,20 +280,20 @@ void MSWindowsClipboardStatusWindow::on_update()
 
     case ClipboardTransferProgress::State::Completed:
         transfer_active_ = false;
-        KillTimer(window_, kShowTimer);
+        KillTimer(window_, kStatusShowTimer);
         hide();
         break;
 
     case ClipboardTransferProgress::State::Failed:
         transfer_active_ = false;
-        KillTimer(window_, kShowTimer);
+        KillTimer(window_, kStatusShowTimer);
         shown_ = progress;
         // a failure is only worth showing if the transfer was taking a while
-        if (visible_ || now - started_ >= std::chrono::milliseconds(kShowDelayMs)) {
+        if (visible_ || now - started_ >= std::chrono::milliseconds(kStatusShowDelayMs)) {
             show();
             painted_ = now;
             InvalidateRect(window_, nullptr, FALSE);
-            SetTimer(window_, kHideTimer, kFailureDisplayMs, nullptr);
+            SetTimer(window_, kStatusHideTimer, kStatusFailureDisplayMs, nullptr);
         }
         break;
     }
@@ -305,10 +307,10 @@ void MSWindowsClipboardStatusWindow::show()
         work.right = GetSystemMetrics(SM_CXSCREEN);
         work.bottom = GetSystemMetrics(SM_CYSCREEN);
     }
-    int width = scale(kWidth);
-    int height = scale(kHeight);
-    SetWindowPos(window_, HWND_TOPMOST, work.right - width - scale(kMargin),
-                 work.bottom - height - scale(kMargin), width, height,
+    int width = scale(kStatusWidth);
+    int height = scale(kStatusHeight);
+    SetWindowPos(window_, HWND_TOPMOST, work.right - width - scale(kStatusMargin),
+                 work.bottom - height - scale(kStatusMargin), width, height,
                  SWP_NOACTIVATE | SWP_SHOWWINDOW);
     visible_ = true;
     InvalidateRect(window_, nullptr, FALSE);
@@ -336,22 +338,22 @@ void MSWindowsClipboardStatusWindow::paint(HDC hdc)
     FrameRect(hdc, &client, border);
 
     SetBkMode(hdc, TRANSPARENT);
-    int padding = scale(kPadding);
+    int padding = scale(kStatusPadding);
     RECT line = {client.left + padding, client.top + scale(10), client.right - padding,
                  client.top + scale(32)};
 
     HGDIOBJ old_font = SelectObject(hdc, title_font_);
     SetTextColor(hdc, RGB(255, 255, 255));
-    DrawTextW(hdc, title_for(shown_), -1, &line,
+    DrawTextW(hdc, status_title_for(shown_), -1, &line,
               DT_SINGLELINE | DT_LEFT | DT_VCENTER | DT_END_ELLIPSIS | DT_NOPREFIX);
 
     std::wstring detail;
     if (shown_.state == ClipboardTransferProgress::State::Failed) {
         detail = L"The transfer failed. Copy the contents again to retry.";
     } else if (shown_.total > 0) {
-        detail = format_bytes(shown_.received) + L" of " + format_bytes(shown_.total);
+        detail = status_format_bytes(shown_.received) + L" of " + status_format_bytes(shown_.total);
     } else {
-        detail = format_bytes(shown_.received);
+        detail = status_format_bytes(shown_.received);
     }
     line.top = client.top + scale(34);
     line.bottom = client.top + scale(52);
@@ -361,8 +363,8 @@ void MSWindowsClipboardStatusWindow::paint(HDC hdc)
               DT_SINGLELINE | DT_LEFT | DT_VCENTER | DT_END_ELLIPSIS | DT_NOPREFIX);
     SelectObject(hdc, old_font);
 
-    RECT bar = {client.left + padding, client.bottom - scale(kPadding) - scale(kBarHeight),
-                client.right - padding, client.bottom - scale(kPadding)};
+    RECT bar = {client.left + padding, client.bottom - scale(kStatusPadding) - scale(kStatusBarHeight),
+                client.right - padding, client.bottom - scale(kStatusPadding)};
     FillRect(hdc, &bar, track);
     if (shown_.state == ClipboardTransferProgress::State::Failed) {
         FillRect(hdc, &bar, fill);
