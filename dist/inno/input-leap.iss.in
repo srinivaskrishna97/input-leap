@@ -104,8 +104,10 @@ begin
 	Sleep(1000);
 end;
 
-function PrepareToInstall(var NeedsRestart: Boolean): String;
+// PrepareToInstall is taken by products.pas, so use the step just before the files are
+// installed
+procedure CurStepChanged(CurStep: TSetupStep);
 begin
-	StopInputLeap();
-	Result := '';
+	if CurStep = ssInstall then
+		StopInputLeap();
 end;
