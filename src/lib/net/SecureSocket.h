@@ -53,6 +53,8 @@ public:
     void secureConnect();
     void secureAccept();
     int secureRead(void* buffer, int size, int& read);
+    // Whether OpenSSL holds received data that has not been read yet
+    bool has_buffered_input();
     int secureWrite(const void* buffer, int size, int& wrote);
     EJobResult doRead() override;
     EJobResult doWrite() override;

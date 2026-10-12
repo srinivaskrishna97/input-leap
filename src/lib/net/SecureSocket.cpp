@@ -170,7 +170,12 @@ SecureSocket::doRead()
         do {
             m_inputBuffer.write(buffer, bytesRead);
 
-            if (m_inputBuffer.getSize() > MAX_INPUT_BUFFER_SIZE) {
+            // Stop once the input buffer is large, but only when OpenSSL holds no more data.
+            // The multiplexer is woken only for data still queued in the socket, and Windows
+            // signals that again only after a read that reaches the socket. If decrypted data
+            // were left inside OpenSSL, the next read would be served from there without
+            // reaching the socket, and the connection would never be reported readable again.
+            if (m_inputBuffer.getSize() > MAX_INPUT_BUFFER_SIZE && !has_buffered_input()) {
                 break;
             }
 
@@ -272,6 +277,12 @@ SecureSocket::secureRead(void* buffer, int size, int& read)
     // not have an error code from SSL_get_error(). If this happens, it is
     // itself an error. Let the parent handle the case
     return read;
+}
+
+bool SecureSocket::has_buffered_input()
+{
+    std::lock_guard<std::mutex> ssl_lock{ssl_mutex_};
+    return m_ssl->m_ssl != nullptr && SSL_has_pending(m_ssl->m_ssl) != 0;
 }
 
 int
