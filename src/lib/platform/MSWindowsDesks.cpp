@@ -508,6 +508,18 @@ MSWindowsDesks::deskEnter(Desk* desk)
 {
     if (!m_isPrimary) {
         ReleaseCapture();
+
+        // The cursor was parked at the center of the screen while it was hidden, and the move
+        // to the point where it enters is injected as input, which is processed asynchronously.
+        // Put the cursor there right away so that it does not show up at the center first when
+        // the injected move is still being processed.
+        POINT pos;
+        if (m_haveLastFakeMove && GetCursorPos(&pos) &&
+            (pos.x != m_lastFakeX || pos.y != m_lastFakeY)) {
+            LOG_DEBUG("cursor at %d,%d when shown, moving it to %d,%d", pos.x, pos.y,
+                      m_lastFakeX, m_lastFakeY);
+            SetCursorPos(m_lastFakeX, m_lastFakeY);
+        }
     }
     ShowCursor(TRUE);
     SetWindowPos(desk->m_window, HWND_BOTTOM, 0, 0, 0, 0,
@@ -668,8 +680,10 @@ void MSWindowsDesks::desk_thread(Desk* desk)
             break;
 
         case INPUTLEAP_MSG_FAKE_MOVE:
-            deskMouseMove(static_cast<std::int32_t>(msg.wParam),
-                          static_cast<std::int32_t>(msg.lParam));
+            m_lastFakeX = static_cast<std::int32_t>(msg.wParam);
+            m_lastFakeY = static_cast<std::int32_t>(msg.lParam);
+            m_haveLastFakeMove = true;
+            deskMouseMove(m_lastFakeX, m_lastFakeY);
             break;
 
         case INPUTLEAP_MSG_FAKE_REL_MOVE:

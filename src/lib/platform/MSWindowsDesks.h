@@ -312,6 +312,11 @@ private:
     bool foreground_pending_ = false;
     HWND foreground_target_ = nullptr;
     HWND foreground_attach_to_ = nullptr;
+
+    // the last position that a fake mouse move was sent to (desk thread only)
+    bool m_haveLastFakeMove = false;
+    std::int32_t m_lastFakeX = 0;
+    std::int32_t m_lastFakeY = 0;
 };
 
 } // namespace inputleap
