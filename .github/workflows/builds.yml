@@ -176,7 +176,8 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: flatpak/libportal
-          ref: main
+          # libportal 0.10 and later need GLib 2.80, which is newer than the one in Debian 12
+          ref: 0.9.1
           path: libportal
 
       - if: matrix.wayland == 'latest'
@@ -429,7 +430,8 @@ jobs:
       matrix:
        include:
          - name: Windows Qt5
-           os: windows-2019
+           # the windows-2019 runner image has been retired
+           os: windows-2022
            qt-version: 5.15
            qt-major: 5
          - name: Windows Qt6
