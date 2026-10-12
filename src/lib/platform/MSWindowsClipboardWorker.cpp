@@ -108,7 +108,23 @@ bool MSWindowsClipboardWorker::create_window()
     // a message-only window is never shown and does not receive broadcast messages
     window_ = CreateWindowExW(0, kClipboardWorkerClassName, L"InputLeap clipboard", 0,
                               0, 0, 0, 0, HWND_MESSAGE, nullptr, instance, this);
-    return window_ != nullptr;
+    if (window_ == nullptr) {
+        return false;
+    }
+
+    // InputLeap usually runs with higher privileges than the applications that put data on
+    // the clipboard.  Windows then withholds file lists (CF_HDROP) from it unless the window
+    // allows the messages that carry them across privilege levels.
+    const UINT kMsgCopyGlobalData = 0x0049;
+    const UINT kMsgCopyData = 0x004A;
+    const UINT kMsgDropFiles = 0x0233;
+    for (UINT msg : {kMsgCopyGlobalData, kMsgCopyData, kMsgDropFiles}) {
+        if (!ChangeWindowMessageFilterEx(window_, msg, MSGFLT_ALLOW, nullptr)) {
+            LOG_DEBUG("cannot allow message 0x%x for the clipboard window (error %lu)", msg,
+                      GetLastError());
+        }
+    }
+    return true;
 }
 
 void MSWindowsClipboardWorker::thread_main()
@@ -609,6 +625,30 @@ void MSWindowsClipboardWorker::capture_now()
     }
 
     auto data = marshall_clipboard(clipboard);
+
+    if (data->size() <= 4) {
+        // nothing recognized: log which formats the clipboard has, to see what was missed
+        std::string formats;
+        if (OpenClipboard(window_)) {
+            for (UINT format = EnumClipboardFormats(0); format != 0;
+                 format = EnumClipboardFormats(format)) {
+                wchar_t name[64] = {};
+                int length = GetClipboardFormatNameW(format, name, 64);
+                std::string entry = std::to_string(format);
+                if (length > 0) {
+                    entry += ':';
+                    for (int i = 0; i < length; ++i) {
+                        entry += name[i] < 128 ? static_cast<char>(name[i]) : '?';
+                    }
+                }
+                formats += (formats.empty() ? "" : ",") + entry;
+            }
+            CloseClipboard();
+        } else {
+            formats = "(clipboard busy)";
+        }
+        LOG_DEBUG("clipboard has no known formats; win32 formats: %s", formats.c_str());
+    }
 
     if (GetClipboardSequenceNumber() != sequence) {
         // the clipboard changed while it was being read

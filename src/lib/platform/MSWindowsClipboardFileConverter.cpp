@@ -123,6 +123,9 @@ std::string MSWindowsClipboardFileConverter::toIClipboard(HANDLE data) const
 {
     HDROP drop = static_cast<HDROP>(data);
     UINT count = DragQueryFileW(drop, 0xFFFFFFFF, nullptr, 0);
+    if (count == 0) {
+        LOG_DEBUG("no files in the drop list on the clipboard (error %lu)", GetLastError());
+    }
     std::vector<fs::path> paths;
     for (UINT i = 0; i < count; ++i) {
         UINT length = DragQueryFileW(drop, i, nullptr, 0);
