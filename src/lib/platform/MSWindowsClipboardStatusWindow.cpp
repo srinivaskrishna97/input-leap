@@ -142,7 +142,8 @@ bool MSWindowsClipboardStatusWindow::create_window()
         window_class.style = CS_HREDRAW | CS_VREDRAW;
         window_class.lpfnWndProc = &MSWindowsClipboardStatusWindow::wnd_proc;
         window_class.hInstance = instance;
-        window_class.hCursor = LoadCursorW(nullptr, IDC_ARROW);
+        // IDC_ARROW expands to the ANSI form without UNICODE, so name the resource directly
+        window_class.hCursor = LoadCursorW(nullptr, MAKEINTRESOURCEW(32512));
         window_class.lpszClassName = kStatusWindowClassName;
         g_status_window_class = RegisterClassExW(&window_class);
     });
