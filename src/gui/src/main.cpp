@@ -21,6 +21,7 @@
 
 #include "QInputLeapApplication.h"
 #include "ClipboardFileForwarder.h"
+#include "SingleInstance.h"
 #include "MainWindow.h"
 #include "AppConfig.h"
 #include "SetupWizard.h"
@@ -29,6 +30,7 @@
 #include <QtGui>
 #include <QSettings>
 #include <QMessageBox>
+#include <QPushButton>
 
 #if defined(Q_OS_MAC)
 #include <Carbon/Carbon.h>
@@ -135,6 +137,36 @@ int main(int argc, char* argv[])
 
 	app.switchTranslator(appConfig.language());
 
+    // only one GUI may run for a user, otherwise both start or command a copy of the InputLeap
+    // server or client.  starting InputLeap again offers to restart it.
+    SingleInstance singleInstance(SingleInstance::defaultName());
+    if (singleInstance.otherInstanceRunning()) {
+        QMessageBox question(QMessageBox::Question, QObject::tr("InputLeap"),
+                             QObject::tr("InputLeap is already running.\n\n"
+                                         "Do you want to restart it?"));
+        QPushButton* restart = question.addButton(QObject::tr("Restart"), QMessageBox::AcceptRole);
+        question.addButton(QObject::tr("Show the running InputLeap"), QMessageBox::RejectRole);
+        question.setDefaultButton(restart);
+        question.exec();
+        if (question.clickedButton() != restart) {
+            singleInstance.requestShow();
+            return 0;
+        }
+        if (!singleInstance.requestQuit(15000)) {
+            QMessageBox::warning(nullptr, QObject::tr("InputLeap"),
+                                 QObject::tr("The running InputLeap did not close. Quit it from "
+                                             "its tray icon, then start InputLeap again."));
+            return 1;
+        }
+    }
+    if (!singleInstance.listen()) {
+        QMessageBox::warning(nullptr, QObject::tr("InputLeap"),
+                             QObject::tr("InputLeap is already running but does not respond, "
+                                         "e.g. because it runs with administrator rights. Quit "
+                                         "it from its tray icon, then start InputLeap again."));
+        return 1;
+    }
+
 	MainWindow mainWindow(settings, appConfig);
 	ClipboardFileForwarder clipboardFileForwarder;
 	SetupWizard setupWizard(mainWindow, true);
@@ -148,6 +180,14 @@ int main(int argc, char* argv[])
 		mainWindow.open();
 	}
     QObject::connect(&mainWindow, &MainWindow::requestLanguageChange, &app, &QInputLeapApplication::switchTranslator);
+
+    // InputLeap was started again while running
+    QObject::connect(&singleInstance, &SingleInstance::showRequested, &mainWindow, [&mainWindow]() {
+        mainWindow.showNormal();
+        mainWindow.raise();
+        mainWindow.activateWindow();
+    });
+    QObject::connect(&singleInstance, &SingleInstance::quitRequested, &app, &QCoreApplication::quit);
 	return app.exec();
 }
 
