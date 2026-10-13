@@ -1528,10 +1528,17 @@ void Server::onClipboardChanged(BaseClientProxy* sender, ClipboardID id, std::ui
 {
 	ClipboardInfo& clipboard = m_clipboards[id];
 
-	// ignore update if sequence number is old
+	// ignore update if sequence number is old, unless it holds the contents that are offered
+	// now, which their hash identifies: a client that reconnected numbers its messages from 0
+	// again, and the data it sends when asked for its offer must not be thrown away
 	if (seqNum < clipboard.m_clipboardSeqNum) {
-		LOG_INFO("ignored screen \"%s\" update of clipboard %d (missequenced)", getName(sender).c_str(), id);
-		return;
+		MarshalledClipboardPtr received = sender->getClipboardData(id);
+		if (!received || !clipboard.m_clipboardOffer.describes(*received)) {
+			LOG_INFO("ignored screen \"%s\" update of clipboard %d (missequenced)", getName(sender).c_str(), id);
+			return;
+		}
+		LOG_DEBUG("accepted screen \"%s\" clipboard %d with an old sequence number, it holds the offered contents",
+				getName(sender).c_str(), id);
 	}
 
 	// should be the expected client
@@ -1686,6 +1693,15 @@ void Server::onClipboardDataRequested(BaseClientProxy* requester, ClipboardID id
 void Server::sendClipboard(BaseClientProxy* screen, ClipboardID id)
 {
     const ClipboardInfo& clipboard = m_clipboards[id];
+
+    // the owner has the contents already.  a screen that reconnected would otherwise get its
+    // own clipboard back, and an offer would replace the real contents on it with a promise
+    // that only it can keep.
+    if (clipboard.m_clipboardOwner == getName(screen)) {
+        screen->setClipboardDirty(id, false);
+        return;
+    }
+
     if (clipboard.m_clipboardOffer.size > m_maximumClipboardSize) {
         return;
     }
