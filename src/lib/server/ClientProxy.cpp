@@ -33,8 +33,11 @@ ClientProxy::~ClientProxy() = default;
 void
 ClientProxy::close(const char* msg)
 {
-    // force the close to be sent before we return
-    get_conn().flush();
+    // Tell the client why it is disconnected.  The message is sent in the background: waiting
+    // for it here would block the server for as long as a client that has stopped reading
+    // keeps its connection open.  The server drops the client after a timeout if it does not
+    // disconnect by itself.
+    get_conn().send_close_1_6(msg);
 }
 
 const EventTarget* ClientProxy::get_event_target() const
