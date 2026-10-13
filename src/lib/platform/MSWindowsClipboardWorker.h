@@ -154,6 +154,8 @@ private:
     std::deque<Command> commands_;
     MarshalledClipboardPtr snapshot_;
     DWORD snapshot_sequence_ = 0;
+    // whether the snapshot holds a file list
+    bool snapshot_has_files_ = false;
     bool capture_pending_ = false;
     OfferState offer_;
 
@@ -167,6 +169,8 @@ private:
     DWORD last_applied_sequence_ = 0;
     int capture_retries_ = 0;
     int apply_retries_ = 0;
+    // how often the current capture found nothing and waited for the GUI's file list
+    int empty_capture_waits_ = 0;
 };
 
 } // namespace inputleap

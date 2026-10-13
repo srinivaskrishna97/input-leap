@@ -50,6 +50,12 @@ const UINT kClipboardRetryDelayMs = 50;
 const int kClipboardMaxCaptureRetries = 40;
 const int kClipboardMaxApplyRetries = 40;
 
+// Right after files are copied in Explorer, the clipboard holds only OLE's markers, which
+// InputLeap does not recognize, and the GUI sends the paths of the files a moment later. A
+// capture that finds nothing waits this long for them, so that one copy makes one offer.
+const UINT kClipboardEmptyCaptureWaitMs = 50;
+const int kClipboardMaxEmptyCaptureWaits = 5;
+
 // Identifies the file lists that the GUI sends with WM_COPYDATA, see ClipboardFileForwarder
 const ULONG_PTR kClipboardFileListMagic = 0x494C4650; // "ILFP"
 
@@ -167,6 +173,7 @@ LRESULT MSWindowsClipboardWorker::handle_message(UINT msg, WPARAM wparam, LPARAM
 
     case kClipboardWorkerMsgCapture:
         capture_retries_ = 0;
+        empty_capture_waits_ = 0;
         schedule_capture(kClipboardCaptureDelayMs);
         return 0;
 
@@ -255,10 +262,8 @@ bool MSWindowsClipboardWorker::on_copy_data(const COPYDATASTRUCT* data)
         std::lock_guard<std::mutex> lock(mutex_);
         user_files_ = std::move(paths);
         user_files_sequence_ = sequence;
-        // a snapshot taken without the files has to be replaced
-        if (snapshot_ && snapshot_sequence_ == sequence) {
-            snapshot_.reset();
-        }
+        // A snapshot taken without the files is replaced by a new capture. It stays available
+        // until then, because it may have been offered and requested already.
         capture_pending_ = true;
     }
     capture_retries_ = 0;
@@ -676,7 +681,11 @@ void MSWindowsClipboardWorker::capture_now()
 
     {
         std::lock_guard<std::mutex> lock(mutex_);
-        if (snapshot_ && snapshot_sequence_ == sequence) {
+        // the snapshot is up to date, unless the GUI has sent the files on the clipboard since
+        // it was taken without them
+        bool files_missing = user_files_sequence_ == sequence && !user_files_.empty() &&
+                             !snapshot_has_files_;
+        if (snapshot_ && snapshot_sequence_ == sequence && !files_missing) {
             capture_pending_ = false;
             return;
         }
@@ -705,8 +714,9 @@ void MSWindowsClipboardWorker::capture_now()
             user_files = user_files_;
         }
     }
-    if (!user_files.empty() && clipboard.open(0)) {
-        if (!clipboard.has(IClipboard::kFiles)) {
+    bool has_files = false;
+    if (clipboard.open(0)) {
+        if (!user_files.empty() && !clipboard.has(IClipboard::kFiles)) {
             std::string files;
             if (read_clipboard_files(user_files, kClipboardFilesMaxBytes, files)) {
                 clipboard.add(IClipboard::kFiles, files);
@@ -714,10 +724,19 @@ void MSWindowsClipboardWorker::capture_now()
                          user_files.size(), files.size());
             }
         }
+        has_files = clipboard.has(IClipboard::kFiles);
         clipboard.close();
     }
 
     auto data = marshall_clipboard(clipboard);
+
+    if (data->size() <= 4 && user_files.empty() &&
+        empty_capture_waits_ < kClipboardMaxEmptyCaptureWaits) {
+        // nothing recognized yet: give the GUI a moment to send the paths of copied files
+        ++empty_capture_waits_;
+        schedule_capture(kClipboardEmptyCaptureWaitMs);
+        return;
+    }
 
     if (data->size() <= 4) {
         // nothing recognized: log which formats the clipboard has, to see what was missed
@@ -755,10 +774,12 @@ void MSWindowsClipboardWorker::capture_now()
     }
 
     capture_retries_ = 0;
+    empty_capture_waits_ = 0;
     {
         std::lock_guard<std::mutex> lock(mutex_);
         snapshot_ = data;
         snapshot_sequence_ = sequence;
+        snapshot_has_files_ = has_files;
         capture_pending_ = false;
     }
 
