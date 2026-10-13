@@ -279,6 +279,10 @@ MSWindowsWatchdog::startProcess()
         m_processRunning = false;
     }
 
+    // only one copy may run, so also shut down any other, e.g. one that a previous instance of
+    // the service left behind
+    shutdownExistingProcesses();
+
     m_session.updateActiveSession();
 
     BOOL createRet;
@@ -504,18 +508,33 @@ MSWindowsWatchdog::shutdownExistingProcesses()
         throw std::runtime_error(error_code_to_string_windows(GetLastError()));
     }
 
-    // now just iterate until we can find winlogon.exe pid
-    DWORD pid = 0;
+    // The server and client programs that the service runs.  These names were mistyped as
+    // "InputLeapc.exe" and "InputLeaps.exe" when the project was renamed, so copies left running,
+    // e.g. by an instance of the service that crashed, were never shut down.  A second client
+    // with the same name is refused by the server and keeps retrying, and a second server cannot
+    // use the port while the copy left behind keeps running an outdated configuration.
+    static const char* const kProgramNames[] = { "input-leaps.exe", "input-leapc.exe" };
+
     while (gotEntry) {
 
         // make sure we're not checking the system process
         if (entry.th32ProcessID != 0) {
 
-            if (_stricmp(entry.szExeFile, "InputLeapc.exe") == 0 ||
-                _stricmp(entry.szExeFile, "InputLeaps.exe") == 0) {
-
+            bool isProgram = false;
+            for (const char* name : kProgramNames) {
+                isProgram = isProgram || _stricmp(entry.szExeFile, name) == 0;
+            }
+            if (isProgram) {
+                LOG_INFO("shutting down %s that is still running, pid=%d", entry.szExeFile,
+                         entry.th32ProcessID);
                 HANDLE handle = OpenProcess(PROCESS_ALL_ACCESS, FALSE, entry.th32ProcessID);
-                shutdownProcess(handle, entry.th32ProcessID, 10);
+                if (handle != nullptr) {
+                    shutdownProcess(handle, entry.th32ProcessID, 10);
+                    CloseHandle(handle);
+                }
+                else {
+                    LOG_WARN("cannot open process %d to shut it down", entry.th32ProcessID);
+                }
             }
         }
 
