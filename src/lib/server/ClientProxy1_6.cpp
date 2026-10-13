@@ -269,6 +269,9 @@ bool ClientProxy1_6::parseMessage(const std::uint8_t* code)
     else if (memcmp(code, kMsgDClipboardData, 4) == 0) {
         return recvClipboardData();
     }
+    else if (memcmp(code, kMsgDClipboardAge, 4) == 0) {
+        return recvClipboardAge();
+    }
     return false;
 }
 
@@ -684,6 +687,35 @@ bool ClientProxy1_6::recvClipboardDataRequest()
 
     m_events->add_event(EventType::CLIPBOARD_DATA_REQUESTED, get_event_target(),
                         create_event_data<ClipboardOfferInfo>(info));
+    return true;
+}
+
+bool ClientProxy1_6::recvClipboardAge()
+{
+    if ((m_clipboardCaps & kClipboardCapAge) == 0) {
+        return false;
+    }
+
+    ClipboardID id;
+    std::uint32_t age;
+    if (!ProtocolUtil::readf(getStream(), kMsgDClipboardAge + 4, &id, &age)) {
+        return false;
+    }
+    if (id >= kClipboardEnd) {
+        return false;
+    }
+
+    ClipboardAgeInfo info;
+    info.id = id;
+    info.age_ms = age;
+    if (age == kClipboardAgeUnknown) {
+        LOG_DEBUG("client \"%s\" clipboard %d is of unknown age", getName().c_str(), id);
+    } else {
+        LOG_DEBUG("client \"%s\" clipboard %d is %u ms old", getName().c_str(), id, age);
+    }
+
+    m_events->add_event(EventType::CLIPBOARD_AGE, get_event_target(),
+                        create_event_data<ClipboardAgeInfo>(info));
     return true;
 }
 

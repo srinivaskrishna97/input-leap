@@ -184,8 +184,28 @@ void
 Client::handshakeComplete()
 {
     m_ready = true;
+    m_enteredSinceConnect = false;
     m_screen->enable();
+
+    // The server used to be assumed to own the clipboards, which emptied this screen's.  A
+    // server that compares ages is told how old the contents are instead, and the younger of
+    // the two clipboards wins.
+    for (ClipboardID id = 0; id < kClipboardEnd; ++id) {
+        if (m_enableClipboard && m_maximumClipboardSize != 0 && serverComparesClipboardAges()) {
+            m_announceClipboard[id] = true;
+            announceClipboard(id);
+        }
+        else {
+            grabClipboard(id);
+        }
+    }
+
     send_event(EventType::CLIENT_CONNECTED);
+}
+
+bool Client::serverComparesClipboardAges() const
+{
+    return m_server != nullptr && (m_server->clipboardCapabilities() & kClipboardCapAge) != 0;
 }
 
 bool
@@ -230,6 +250,7 @@ void Client::getCursorPos(std::int32_t& x, std::int32_t& y) const
 void Client::enter(std::int32_t xAbs, std::int32_t yAbs, std::uint32_t, KeyModifierMask mask, bool)
 {
     m_active = true;
+    m_enteredSinceConnect = true;
     m_screen->mouseMove(xAbs, yAbs);
     m_screen->enter(mask);
 
@@ -750,6 +771,19 @@ void Client::handle_clipboard_grabbed(const Event& event)
 
     const auto& info = event.get_data_as<IScreen::ClipboardInfo>();
 
+    if (!m_enteredSinceConnect && serverComparesClipboardAges()) {
+        // the server has not entered this screen since it connected, so a grab would carry
+        // a sequence number that the server regards as old.  announce the contents with their
+        // age instead, once the screen has captured them.
+        m_announceClipboard[info.m_id] = true;
+        m_ownClipboard[info.m_id] = true;
+        m_sentClipboard[info.m_id] = false;
+        m_timeClipboard[info.m_id] = 0;
+        m_hasOfferedClipboard[info.m_id] = false;
+        announceClipboard(info.m_id);
+        return;
+    }
+
     // grab ownership
     m_server->onGrabClipboard(info.m_id);
 
@@ -777,11 +811,66 @@ void Client::handle_clipboard_changed(const Event& event)
         return;
     }
 
+    if (m_announceClipboard[info.m_id] ||
+        (!m_enteredSinceConnect && serverComparesClipboardAges())) {
+        // contents to be announced with their age, see handle_clipboard_grabbed()
+        m_announceClipboard[info.m_id] = true;
+        announceClipboard(info.m_id);
+        return;
+    }
+
     // the screen finished capturing a clipboard that we own.  if we're not the active screen
     // then send it now, otherwise it is sent when we leave.
     if (m_ownClipboard[info.m_id] && !m_active) {
         sendClipboard(info.m_id);
     }
+}
+
+void Client::announceClipboard(ClipboardID id)
+{
+    // note -- only with a server that supports kClipboardCapAge
+    MarshalledClipboardPtr data;
+    std::uint32_t age = kClipboardAgeUnknown;
+    if (m_screen->hasClipboardSnapshots()) {
+        data = m_screen->getClipboardSnapshot(id);
+        if (!data) {
+            // the screen sends CLIPBOARD_CHANGED once the capture completes
+            return;
+        }
+        age = m_screen->getClipboardSnapshotAge(id);
+    }
+    else {
+        Clipboard clipboard;
+        if (clipboard.open(0)) {
+            clipboard.close();
+        }
+        m_screen->getClipboard(id, &clipboard);
+        data = marshall_clipboard(clipboard);
+    }
+    m_announceClipboard[id] = false;
+
+    if (marshalled_clipboard_formats(data->data()) == 0 ||
+        data->size() >= m_maximumClipboardSize) {
+        // nothing worth keeping, so the server's contents may replace it, as they always did
+        LOG_DEBUG("clipboard %d has nothing to keep", id);
+        grabClipboard(id);
+        return;
+    }
+
+    if (age == kClipboardAgeUnknown) {
+        LOG_DEBUG("announcing clipboard %d of unknown age", id);
+    } else {
+        LOG_DEBUG("announcing clipboard %d, %u ms old", id, age);
+    }
+    m_server->onClipboardAge(id, age);
+
+    // the server takes this screen as the owner if the contents are younger than its own.
+    // behave as the owner until the server sends other contents.
+    m_ownClipboard[id] = true;
+    m_sentClipboard[id] = true;
+    m_dataClipboard[id] = data;
+    m_hasOfferedClipboard[id] = false;
+    sendClipboardContents(id, data);
 }
 
 void Client::handle_clipboard_data_requested(const Event& event)

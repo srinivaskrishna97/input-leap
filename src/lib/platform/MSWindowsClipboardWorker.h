@@ -18,11 +18,13 @@
 
 #include "base/EventTarget.h"
 #include "inputleap/ClipboardData.h"
+#include "inputleap/clipboard_types.h"
 #include "io/filesystem.h"
 
 #define WIN32_LEAN_AND_MEAN
 #include <Windows.h>
 
+#include <chrono>
 #include <condition_variable>
 #include <deque>
 #include <mutex>
@@ -81,6 +83,12 @@ public:
     */
     MarshalledClipboardPtr current_snapshot() const;
 
+    /*! Returns how many milliseconds ago the current contents were put on the clipboard, or
+        kClipboardAgeUnknown if the worker did not see them arrive, e.g. because they were
+        there before it started or because the change was noticed only by poll().
+    */
+    std::uint32_t snapshot_age_ms() const;
+
     /// Replaces the contents of the clipboard. Applied asynchronously.
     void apply(MarshalledClipboardPtr data);
 
@@ -129,6 +137,7 @@ private:
     bool on_copy_data(const COPYDATASTRUCT* data);
 
     void post(UINT msg);
+    void post_capture();
     void enqueue(Command command);
     void process_commands();
     bool apply_now(const MarshalledClipboardPtr& data);
@@ -154,6 +163,13 @@ private:
     std::deque<Command> commands_;
     MarshalledClipboardPtr snapshot_;
     DWORD snapshot_sequence_ = 0;
+    // when the contents of the snapshot were put on the clipboard, if that was seen
+    bool snapshot_age_known_ = false;
+    std::chrono::steady_clock::time_point snapshot_changed_;
+    // the last change the worker was told about, with the clipboard sequence number it saw
+    bool notified_ = false;
+    DWORD notified_sequence_ = 0;
+    std::chrono::steady_clock::time_point notified_time_;
     // whether the snapshot holds a file list
     bool snapshot_has_files_ = false;
     bool capture_pending_ = false;

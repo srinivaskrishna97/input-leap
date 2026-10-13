@@ -184,6 +184,8 @@ public:
 private:
     void sendClipboard(ClipboardID);
     void sendClipboardContents(ClipboardID, const MarshalledClipboardPtr& data);
+    bool serverComparesClipboardAges() const;
+    void announceClipboard(ClipboardID);
     void send_event(EventType);
     void sendConnectionFailedEvent(const char* msg);
     void send_file_chunk(const FileChunk& data);
@@ -243,6 +245,11 @@ private:
     // the hash of the last contents whose data was sent to the server
     bool m_pushedClipboard = false;
     std::uint64_t m_pushedClipboardHash = 0;
+
+    // whether a clipboard is to be announced with its age, see announceClipboard()
+    bool m_announceClipboard[kClipboardEnd] = {};
+    // whether the server has entered this screen since it connected
+    bool m_enteredSinceConnect = false;
     IEventQueue* m_events;
     std::size_t m_expectedFileSize;
     std::string m_receivedFileData;

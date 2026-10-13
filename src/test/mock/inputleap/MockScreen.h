@@ -37,6 +37,13 @@ public:
     MOCK_METHOD0(resetOptions, void());
     MOCK_METHOD1(setOptions, void(const OptionsList&));
     MOCK_METHOD0(enable, void());
+    // the clipboard is left alone: there is no platform screen behind this mock
+    MOCK_METHOD1(grabClipboard, void(ClipboardID));
+    MOCK_CONST_METHOD2(getClipboard, bool(ClipboardID, IClipboard*));
+    MOCK_CONST_METHOD0(hasClipboardSnapshots, bool());
+    MOCK_CONST_METHOD1(getClipboardSnapshot, MarshalledClipboardPtr(ClipboardID));
+    MOCK_CONST_METHOD1(getClipboardSnapshotAge, std::uint32_t(ClipboardID));
+    MOCK_CONST_METHOD0(supportsClipboardOffers, bool());
 };
 
 } // namespace inputleap

@@ -296,6 +296,11 @@ enum class EventType : std::uint32_t {
     */
     CLIPBOARD_TRANSFER_PROGRESS,
 
+    /** Sent by a client proxy when the client reports how old its clipboard contents are. The
+        data is a ClipboardAgeInfo.
+    */
+    CLIPBOARD_AGE,
+
     /// This event is sent whenever a file chunk is transferred.
     FILE_CHUNK_SENDING,
 

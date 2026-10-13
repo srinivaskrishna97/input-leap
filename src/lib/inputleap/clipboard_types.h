@@ -60,9 +60,23 @@ static const std::uint32_t kClipboardCapCompression = 1u << 1;
 // The peer accepts the IClipboard::kFiles format.
 static const std::uint32_t kClipboardCapFiles       = 1u << 2;
 
+// The client tells how old its clipboard contents are with kMsgDClipboardAge when it connects,
+// and the server keeps the younger of the two clipboards instead of replacing the client's.
+static const std::uint32_t kClipboardCapAge         = 1u << 3;
+
 static const std::uint32_t kClipboardCapsSupported  = kClipboardCapOffers |
                                                       kClipboardCapCompression |
-                                                      kClipboardCapFiles;
+                                                      kClipboardCapFiles |
+                                                      kClipboardCapAge;
+
+// kMsgDClipboardAge age of contents whose age is not known
+static const std::uint32_t kClipboardAgeUnknown     = 0xffffffffu;
+
+//! How old the contents of a client's clipboard are, see kMsgDClipboardAge
+struct ClipboardAgeInfo {
+    ClipboardID id = 0;
+    std::uint32_t age_ms = kClipboardAgeUnknown;
+};
 
 //! The state of clipboard contents arriving from another screen, for showing their progress
 struct ClipboardTransferProgress {

@@ -492,6 +492,11 @@ MarshalledClipboardPtr Screen::getClipboardSnapshot(ClipboardID id) const
     return m_screen->getClipboardSnapshot(id);
 }
 
+std::uint32_t Screen::getClipboardSnapshotAge(ClipboardID id) const
+{
+    return m_screen->getClipboardSnapshotAge(id);
+}
+
 bool Screen::supportsClipboardOffers() const
 {
     return m_screen->supportsClipboardOffers();
@@ -520,10 +525,8 @@ Screen::enablePrimary()
 void
 Screen::enableSecondary()
 {
-    // assume primary has all clipboards
-    for (ClipboardID id = 0; id < kClipboardEnd; ++id) {
-        grabClipboard(id);
-    }
+    // the clipboards are left as they are: the client decides whether the server's contents
+    // replace them, see Client::handshakeComplete()
 
     // disable the screen saver if synchronization is enabled
     if (m_screenSaverSync) {

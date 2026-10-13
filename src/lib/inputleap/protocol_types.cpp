@@ -48,6 +48,7 @@ const char*                kMsgDClipboardOffer    = "DCOF%1i%4i%4i%4i%4i%4i%4i";
 const char*                kMsgQClipboardData    = "QCLD%1i%4i%4i";
 const char*                kMsgDClipboardData    = "DCLZ%1i%4i%1i%s";
 const char*                kMsgCClipboardCapabilities = "CCAP%4i";
+const char*                kMsgDClipboardAge     = "DCAG%1i%4i";
 const char*                kMsgDInfo            = "DINF%2i%2i%2i%2i%2i%2i%2i";
 const char*                kMsgDSetOptions        = "DSOP%4I";
 const char*                kMsgDFileTransfer    = "DFTR%1i%s";

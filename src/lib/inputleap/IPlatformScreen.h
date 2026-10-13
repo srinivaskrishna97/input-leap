@@ -109,6 +109,15 @@ public:
     */
     virtual MarshalledClipboardPtr getClipboardSnapshot(ClipboardID id) const = 0;
 
+    //! Get the age of the prepared clipboard contents
+    /*!
+    Returns how many milliseconds ago the contents returned by getClipboardSnapshot() were put
+    on the clipboard, or kClipboardAgeUnknown if the screen did not see them arrive, e.g.
+    because they were there before it started. Only valid if hasClipboardSnapshots() returns
+    true.
+    */
+    virtual std::uint32_t getClipboardSnapshotAge(ClipboardID id) const = 0;
+
     //! Test if the screen supports clipboard offers
     /*!
     Returns true if the screen can put offered clipboard contents on the system clipboard

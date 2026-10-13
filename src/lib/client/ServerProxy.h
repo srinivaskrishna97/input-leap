@@ -72,6 +72,12 @@ public:
     */
     void onClipboardOffered(ClipboardID, const ClipboardOffer& offer, std::uint32_t flags);
 
+    //! Tell the server how old the contents of a clipboard are
+    /*!
+    Only valid if the server supports kClipboardCapAge, see kMsgDClipboardAge.
+    */
+    void onClipboardAge(ClipboardID, std::uint32_t age_ms);
+
     //! Ask the server for offered clipboard contents
     void requestClipboardData(ClipboardID, const ClipboardOffer& offer);
 

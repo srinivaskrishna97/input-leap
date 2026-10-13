@@ -303,6 +303,7 @@ private:
     void handle_clipboard_data_requested(const Event& event, BaseClientProxy* client);
     void handle_clipboard_data_unavailable(const Event& event, BaseClientProxy* client);
     void handle_clipboard_transfer_progress(const Event& event);
+    void handle_clipboard_age(const Event& event, BaseClientProxy* client);
     void handle_key_down_event(const Event& event);
     void handle_key_up_event(const Event& event);
     void handle_key_repeat_event(const Event& event);
@@ -329,6 +330,7 @@ private:
     // event processing
     void onClipboardChanged(BaseClientProxy* sender, ClipboardID id, std::uint32_t seqNum);
     void onClipboardOffered(BaseClientProxy* sender, const ClipboardOfferInfo& info);
+    void onClipboardAge(BaseClientProxy* sender, ClipboardID id, std::uint32_t age_ms);
     void onClipboardDataRequested(BaseClientProxy* requester, ClipboardID id,
                                   const ClipboardOffer& offer);
 
@@ -410,6 +412,8 @@ private:
         std::uint32_t m_clipboardSeqNum;
         // whether the contents have been requested from the owner
         bool m_requestedFromOwner;
+        // when the contents last changed, in current_time_seconds(), or 0 if not known
+        double m_changedTime;
         // screens waiting for the contents, e.g. because the user pastes them
         std::vector<BaseClientProxy*> m_waiting;
     };

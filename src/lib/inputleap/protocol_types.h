@@ -277,6 +277,15 @@ extern const char*        kMsgDClipboardData;
 // option.
 extern const char*        kMsgCClipboardCapabilities;
 
+// clipboard age:  secondary -> primary
+// how long ago the contents of the client's clipboard were put there.  sent when the client
+// connects, and whenever its clipboard changes before the server has entered it, in place of
+// kMsgCClipboard, so that the server keeps the younger of its own and the client's clipboard.
+// the client offers the contents right after.  only used once kClipboardCapAge has been
+// negotiated.  $1 = clipboard identifier, $2 = age in milliseconds, kClipboardAgeUnknown if
+// the client did not see the contents arrive.
+extern const char*        kMsgDClipboardAge;
+
 // client data:  secondary -> primary
 // $1 = coordinate of leftmost pixel on secondary screen,
 // $2 = coordinate of topmost pixel on secondary screen,

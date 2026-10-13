@@ -510,6 +510,11 @@ MarshalledClipboardPtr MSWindowsScreen::getClipboardSnapshot(ClipboardID) const
     return snapshot;
 }
 
+std::uint32_t MSWindowsScreen::getClipboardSnapshotAge(ClipboardID) const
+{
+    return m_clipboardWorker->snapshot_age_ms();
+}
+
 void MSWindowsScreen::handle_clipboard_captured()
 {
     sendClipboardEvent(EventType::CLIPBOARD_CHANGED, kClipboardClipboard);

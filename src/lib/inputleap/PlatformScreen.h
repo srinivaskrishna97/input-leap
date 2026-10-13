@@ -73,6 +73,7 @@ public:
     bool setClipboardData(ClipboardID id, const MarshalledClipboardPtr& data) override;
     bool hasClipboardSnapshots() const override { return false; }
     MarshalledClipboardPtr getClipboardSnapshot(ClipboardID) const override { return nullptr; }
+    std::uint32_t getClipboardSnapshotAge(ClipboardID) const override { return kClipboardAgeUnknown; }
     bool supportsClipboardOffers() const override { return false; }
     void setClipboardOffer(ClipboardID, const ClipboardOffer&) override { }
     void setClipboardTransferProgress(const ClipboardTransferProgress&) override { }

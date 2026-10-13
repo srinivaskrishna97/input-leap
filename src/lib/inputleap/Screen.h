@@ -128,7 +128,7 @@ public:
     /*!
     Grabs (i.e. take ownership of) the system clipboard.
     */
-    void grabClipboard(ClipboardID);
+    virtual void grabClipboard(ClipboardID);
 
     //! Activate/deactivate screen saver
     /*!
@@ -326,19 +326,25 @@ public:
     /*!
     See IPlatformScreen::hasClipboardSnapshots().
     */
-    bool hasClipboardSnapshots() const;
+    virtual bool hasClipboardSnapshots() const;
 
     //! Get the prepared clipboard contents
     /*!
     See IPlatformScreen::getClipboardSnapshot().
     */
-    MarshalledClipboardPtr getClipboardSnapshot(ClipboardID id) const;
+    virtual MarshalledClipboardPtr getClipboardSnapshot(ClipboardID id) const;
+
+    //! Get the age of the prepared clipboard contents
+    /*!
+    See IPlatformScreen::getClipboardSnapshotAge().
+    */
+    virtual std::uint32_t getClipboardSnapshotAge(ClipboardID id) const;
 
     //! Test if the screen supports clipboard offers
     /*!
     See IPlatformScreen::supportsClipboardOffers().
     */
-    bool supportsClipboardOffers() const;
+    virtual bool supportsClipboardOffers() const;
 
     void getShape(std::int32_t& x, std::int32_t& y, std::int32_t& width,
                   std::int32_t& height) const override;

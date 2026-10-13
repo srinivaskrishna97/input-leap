@@ -407,6 +407,15 @@ void ServerProxy::onClipboardOffered(ClipboardID id, const ClipboardOffer& offer
                          static_cast<std::uint32_t>(offer.hash));
 }
 
+void ServerProxy::onClipboardAge(ClipboardID id, std::uint32_t age_ms)
+{
+    if ((m_clipboardCaps & kClipboardCapAge) == 0) {
+        return;
+    }
+    LOG_DEBUG("reporting clipboard %d age %u ms", id, age_ms);
+    ProtocolUtil::writef(m_stream, kMsgDClipboardAge, id, age_ms);
+}
+
 void ServerProxy::requestClipboardData(ClipboardID id, const ClipboardOffer& offer)
 {
     LOG_DEBUG("requesting clipboard %d size=%u", id, offer.size);

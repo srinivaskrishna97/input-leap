@@ -111,6 +111,7 @@ private:
     bool recvClipboardOffer();
     bool recvClipboardDataRequest();
     bool recvClipboardData();
+    bool recvClipboardAge();
 
     void sendClipboardOffer(ClipboardID id, const ClipboardOffer& offer, std::uint32_t flags);
     void sendClipboardTransfer(ClipboardID id, const ClipboardTransferPayload& payload);

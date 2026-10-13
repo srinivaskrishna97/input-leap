@@ -289,6 +289,19 @@ void MSWindowsClipboardWorker::enqueue(Command command)
 
 void MSWindowsClipboardWorker::request_capture()
 {
+    // the clipboard changed just now, which is how old its contents will be
+    DWORD sequence = GetClipboardSequenceNumber();
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        notified_ = true;
+        notified_sequence_ = sequence;
+        notified_time_ = std::chrono::steady_clock::now();
+    }
+    post_capture();
+}
+
+void MSWindowsClipboardWorker::post_capture()
+{
     {
         std::lock_guard<std::mutex> lock(mutex_);
         capture_pending_ = true;
@@ -309,7 +322,25 @@ void MSWindowsClipboardWorker::poll()
         return;
     }
     LOG_DEBUG("clipboard changed without notification");
-    request_capture();
+    post_capture();
+}
+
+std::uint32_t MSWindowsClipboardWorker::snapshot_age_ms() const
+{
+    DWORD sequence = GetClipboardSequenceNumber();
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (!snapshot_ || snapshot_sequence_ != sequence || !snapshot_age_known_) {
+        return kClipboardAgeUnknown;
+    }
+    auto age = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - snapshot_changed_).count();
+    if (age < 0) {
+        return 0;
+    }
+    if (age >= static_cast<long long>(kClipboardAgeUnknown)) {
+        return kClipboardAgeUnknown - 1;
+    }
+    return static_cast<std::uint32_t>(age);
 }
 
 MarshalledClipboardPtr MSWindowsClipboardWorker::current_snapshot() const
@@ -780,6 +811,8 @@ void MSWindowsClipboardWorker::capture_now()
         snapshot_ = data;
         snapshot_sequence_ = sequence;
         snapshot_has_files_ = has_files;
+        snapshot_age_known_ = notified_ && notified_sequence_ == sequence;
+        snapshot_changed_ = notified_time_;
         capture_pending_ = false;
     }
 

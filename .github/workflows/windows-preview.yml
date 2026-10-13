@@ -77,3 +77,10 @@ jobs:
           name: windows-installer-preview
           path: .\build\installer-inno\bin
           if-no-files-found: error
+
+      # the plain programs, for running tests against a build without installing it
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-binaries-preview
+          path: .\build\input-leap-install
+          if-no-files-found: error

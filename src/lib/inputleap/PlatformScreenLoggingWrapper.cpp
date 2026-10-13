@@ -83,6 +83,13 @@ MarshalledClipboardPtr PlatformScreenLoggingWrapper::getClipboardSnapshot(Clipbo
     return result;
 }
 
+std::uint32_t PlatformScreenLoggingWrapper::getClipboardSnapshotAge(ClipboardID id) const
+{
+    auto result = screen_->getClipboardSnapshotAge(id);
+    LOG_DEBUG1("PlatformScreen::getClipboardSnapshotAge() id=%d => %u", id, result);
+    return result;
+}
+
 bool PlatformScreenLoggingWrapper::supportsClipboardOffers() const
 {
     return screen_->supportsClipboardOffers();
