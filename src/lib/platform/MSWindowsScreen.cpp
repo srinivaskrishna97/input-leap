@@ -46,6 +46,7 @@
 #include <Shlobj.h>
 #include <comutil.h>
 #include <algorithm>
+#include <cstdlib>
 
 //
 // add backwards compatible multihead support (and suppress bogus warning).
@@ -1454,16 +1455,19 @@ bool MSWindowsScreen::onMouseMove(std::int32_t mx, std::int32_t my)
         LOG_DEBUG5("warping server cursor to center: %+d,%+d", m_xCenter, m_yCenter);
         warpCursorNoFlush(m_xCenter, m_yCenter);
 
-        // examine the motion.  if it's about the distance
-        // from the center of the screen to an edge then
-        // it's probably a bogus motion that we want to
-        // ignore (see warpCursorNoFlush() for a further
-        // description).
+        // examine the motion.  the cursor was parked at the center of the
+        // main monitor, and it is parked there again after every motion, so
+        // a genuine motion is a single step that stays on that monitor.  a
+        // position farther away is left over from before the cursor was
+        // parked (see warpCursorNoFlush() for a further description), e.g.
+        // a position on the monitor the cursor left the server from.
+        // measuring against the edges of the whole virtual screen instead let
+        // such positions through when the server has several monitors: the
+        // next monitor starts just half a monitor away from the center, while
+        // the edge of the virtual screen can be several monitors away.
         static std::int32_t bogusZoneSize = 10;
-        if (-x + bogusZoneSize > m_xCenter - m_x ||
-             x + bogusZoneSize > m_x + m_w - m_xCenter ||
-            -y + bogusZoneSize > m_yCenter - m_y ||
-             y + bogusZoneSize > m_y + m_h - m_yCenter) {
+        if (std::abs(x) + bogusZoneSize > m_xCenter ||
+            std::abs(y) + bogusZoneSize > m_yCenter) {
 
             LOG_DEBUG("dropped bogus delta motion: %+d,%+d", x, y);
         }
