@@ -838,7 +838,7 @@ void KeyState::fakeKeys(const Keystrokes& keys, std::uint32_t count)
     }
 
     // generate key events
-    LOG_DEBUG1("keystrokes:");
+    LOG_DEBUG2("keystrokes:");
     for (auto k = keys.begin(); k != keys.end(); ) {
         if (k->m_type == Keystroke::kButton && k->m_data.m_button.m_repeat) {
             // repeat from here up to but not including the next key

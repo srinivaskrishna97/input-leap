@@ -1056,7 +1056,7 @@ MSWindowsScreen::onPreDispatch(HWND hwnd,
         return onScreensaver(wParam != 0);
 
     case INPUTLEAP_MSG_DEBUG:
-        LOG_DEBUG1("hook: 0x%08x 0x%08x", wParam, lParam);
+        LOG_DEBUG2("hook: 0x%08x 0x%08x", wParam, lParam);
         return true;
     }
 
@@ -1193,7 +1193,7 @@ MSWindowsScreen::onKey(WPARAM wParam, LPARAM lParam)
     static const KeyModifierMask s_ctrlAlt =
         KeyModifierControl | KeyModifierAlt;
 
-    LOG_DEBUG1("event: Key char=%d, vk=0x%02x, nagr=%d, lParam=0x%08x", wParam & 0xffffu, (wParam >> 16) & 0xffu, (wParam & 0x1000000u) ? 1 : 0, lParam);
+    LOG_DEBUG2("event: Key char=%d, vk=0x%02x, nagr=%d, lParam=0x%08x", wParam & 0xffffu, (wParam >> 16) & 0xffu, (wParam & 0x1000000u) ? 1 : 0, lParam);
 
     // get event info
     KeyButton button         = (KeyButton)((lParam & 0x01ff0000) >> 16);

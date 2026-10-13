@@ -65,7 +65,7 @@ void ClientConnectionLoggingWrapper::send_leave_1_6()
 void ClientConnectionLoggingWrapper::send_key_down_1_6(KeyID key, KeyModifierMask mask,
                                                        KeyButton button)
 {
-    LOG_DEBUG1("send key down to \"%s\" id=%d, mask=0x%04x, button=0x%04x",
+    LOG_DEBUG2("send key down to \"%s\" id=%d, mask=0x%04x, button=0x%04x",
          name_.c_str(), key, mask, button);
     conn_->send_key_down_1_6(key, mask, button);
 }
@@ -73,7 +73,7 @@ void ClientConnectionLoggingWrapper::send_key_down_1_6(KeyID key, KeyModifierMas
 void ClientConnectionLoggingWrapper::send_key_up_1_6(KeyID key, KeyModifierMask mask,
                                                      KeyButton button)
 {
-    LOG_DEBUG1("send key up to \"%s\" id=%d, mask=0x%04x, button=0x%04x",
+    LOG_DEBUG2("send key up to \"%s\" id=%d, mask=0x%04x, button=0x%04x",
          name_.c_str(), key, mask, button);
     conn_->send_key_up_1_6(key, mask, button);
 }
@@ -81,7 +81,7 @@ void ClientConnectionLoggingWrapper::send_key_up_1_6(KeyID key, KeyModifierMask 
 void ClientConnectionLoggingWrapper::send_key_repeat_1_6(KeyID key, KeyModifierMask mask,
                                                          std::int32_t count, KeyButton button)
 {
-    LOG_DEBUG1("send key repeat to \"%s\" id=%d, mask=0x%04x, count=%d, button=0x%04x",
+    LOG_DEBUG2("send key repeat to \"%s\" id=%d, mask=0x%04x, count=%d, button=0x%04x",
          name_.c_str(), key, mask, count, button);
     conn_->send_key_repeat_1_6(key, mask, count, button);
 }

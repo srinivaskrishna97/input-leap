@@ -1378,7 +1378,7 @@ XWindowsScreen::handle_system_event(const Event& event)
 void
 XWindowsScreen::onKeyPress(XKeyEvent& xkey)
 {
-	LOG_DEBUG1("event: KeyPress code=%d, state=0x%04x", xkey.keycode, xkey.state);
+	LOG_DEBUG2("event: KeyPress code=%d, state=0x%04x", xkey.keycode, xkey.state);
 	const KeyModifierMask mask = m_keyState->mapModifiersFromX(xkey.state);
 	KeyID key                  = mapKeyFromX(&xkey);
 	if (key != kKeyNone) {
@@ -1439,7 +1439,7 @@ XWindowsScreen::onKeyRelease(XKeyEvent& xkey, bool isRepeat)
 		KeyButton keycode = static_cast<KeyButton>(xkey.keycode);
 		if (!isRepeat) {
 			// no press event follows so it's a plain release
-			LOG_DEBUG1("event: KeyRelease code=%d, state=0x%04x", keycode, xkey.state);
+			LOG_DEBUG2("event: KeyRelease code=%d, state=0x%04x", keycode, xkey.state);
             m_keyState->sendKeyEvent(get_event_target(),
 							false, false, key, mask, 1, keycode);
 		}

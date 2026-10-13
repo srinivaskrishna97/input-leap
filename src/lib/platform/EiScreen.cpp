@@ -576,7 +576,7 @@ void EiScreen::on_key_event(ei_event* event)
     key_state_->update_xkb_state(keyval, pressed);
     KeyModifierMask mask = key_state_->pollActiveModifiers();
 
-    LOG_DEBUG1("event: Key %s keycode=%d keyid=%d mask=0x%x", pressed ? "press" : "release", keycode, keyid, mask);
+    LOG_DEBUG2("event: Key %s keycode=%d keyid=%d mask=0x%x", pressed ? "press" : "release", keycode, keyid, mask);
 
     if (is_primary_ && on_hotkey(keyid, pressed, mask)) {
         return;

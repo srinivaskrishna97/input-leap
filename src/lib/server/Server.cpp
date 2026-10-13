@@ -1853,7 +1853,7 @@ void
 Server::onKeyDown(KeyID id, KeyModifierMask mask, KeyButton button,
 				const char* screens)
 {
-	LOG_DEBUG1("onKeyDown id=%d mask=0x%04x button=0x%04x", id, mask, button);
+	LOG_DEBUG2("onKeyDown id=%d mask=0x%04x button=0x%04x", id, mask, button);
 	assert(m_active != nullptr);
 
 	// relay
@@ -1879,7 +1879,7 @@ void
 Server::onKeyUp(KeyID id, KeyModifierMask mask, KeyButton button,
 				const char* screens)
 {
-	LOG_DEBUG1("onKeyUp id=%d mask=0x%04x button=0x%04x", id, mask, button);
+	LOG_DEBUG2("onKeyUp id=%d mask=0x%04x button=0x%04x", id, mask, button);
 	assert(m_active != nullptr);
 
 	// relay
@@ -1903,7 +1903,7 @@ Server::onKeyUp(KeyID id, KeyModifierMask mask, KeyButton button,
 
 void Server::onKeyRepeat(KeyID id, KeyModifierMask mask, std::int32_t count, KeyButton button)
 {
-	LOG_DEBUG1("onKeyRepeat id=%d mask=0x%04x count=%d button=0x%04x", id, mask, count, button);
+	LOG_DEBUG2("onKeyRepeat id=%d mask=0x%04x count=%d button=0x%04x", id, mask, count, button);
 	assert(m_active != nullptr);
 
 	// relay

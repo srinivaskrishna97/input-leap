@@ -89,8 +89,12 @@ const QString &AppConfig::logFilename() const { return m_LogFilename; }
 QString AppConfig::log_dir() const
 {
 #if defined(Q_OS_WIN)
-    // on windows, we want to log to program files
-    return program_dir() + "log/";
+    // the service writes the log, so it goes to the machine's data folder, where the service
+    // creates the folder.  without the service the log goes to the user's own folder.
+    if (processMode() == Service) {
+        return qEnvironmentVariable("ProgramData", "C:/ProgramData") + "/InputLeap/";
+    }
+    return qEnvironmentVariable("LOCALAPPDATA") + "/InputLeap/";
 #else
     // on unix, we'll log to the standard log dir
     return "/var/log/";
@@ -147,6 +151,13 @@ void AppConfig::loadSettings()
     m_LogLevel = settings().value("logLevel", 3).toInt(); // level 3: INFO
     m_LogToFile = settings().value("logToFile", false).toBool();
     m_LogFilename = settings().value("logFilename", log_dir() + "input-leap.log").toString();
+    // older versions logged to the program folder, and settings copied from Barrier point to
+    // its folder; the service refuses both, so use the default instead
+    QString oldLogFilename = m_LogFilename.toLower().replace('\\', '/');
+    if (oldLogFilename.contains("barrier") ||
+        oldLogFilename.startsWith(program_dir().toLower().replace('\\', '/'))) {
+        m_LogFilename = log_dir() + "input-leap.log";
+    }
     m_WizardLastRun = settings().value("wizardLastRun", 0).toInt();
     m_Language = settings().value("language", QLocale::system().name()).toString();
     m_StartedBefore = settings().value("startedBefore", false).toBool();

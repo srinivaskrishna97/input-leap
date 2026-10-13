@@ -348,7 +348,7 @@ void PlatformScreenLoggingWrapper::setHalfDuplexMask(KeyModifierMask mask)
 
 void PlatformScreenLoggingWrapper::fakeKeyDown(KeyID id, KeyModifierMask mask, KeyButton button)
 {
-    LOG_DEBUG1("PlatformScreen::fakeKeyDown() id=%d mask=%x button=%d", id, mask, button);
+    LOG_DEBUG2("PlatformScreen::fakeKeyDown() id=%d mask=%x button=%d", id, mask, button);
     screen_->fakeKeyDown(id, mask, button);
 }
 
@@ -356,7 +356,7 @@ bool PlatformScreenLoggingWrapper::fakeKeyRepeat(KeyID id, KeyModifierMask mask,
                                                  KeyButton button)
 {
     auto result = screen_->fakeKeyRepeat(id, mask, count, button);
-    LOG_DEBUG1("PlatformScreen::fakeKeyRepeat() id=%d mask=%d count=%d button=%d => %d",
+    LOG_DEBUG2("PlatformScreen::fakeKeyRepeat() id=%d mask=%d count=%d button=%d => %d",
          id, mask, count, button, result);
     return result;
 }
@@ -364,7 +364,7 @@ bool PlatformScreenLoggingWrapper::fakeKeyRepeat(KeyID id, KeyModifierMask mask,
 bool PlatformScreenLoggingWrapper::fakeKeyUp(KeyButton button)
 {
     auto result = screen_->fakeKeyUp(button);
-    LOG_DEBUG1("PlatformScreen::fakeKeyUp() button=%d => %d", button, result);
+    LOG_DEBUG2("PlatformScreen::fakeKeyUp() button=%d => %d", button, result);
     return result;
 }
 
@@ -384,7 +384,7 @@ bool PlatformScreenLoggingWrapper::fakeCtrlAltDel()
 bool PlatformScreenLoggingWrapper::fakeMediaKey(KeyID id)
 {
     auto result = screen_->fakeMediaKey(id);
-    LOG_DEBUG1("PlatformScreen::fakeMediaKey() id=%d => %d", id, result);
+    LOG_DEBUG2("PlatformScreen::fakeMediaKey() id=%d => %d", id, result);
     return result;
 }
 

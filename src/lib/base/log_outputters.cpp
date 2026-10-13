@@ -26,7 +26,8 @@
 namespace inputleap {
 
 enum EFileLogOutputter {
-    kFileSizeLimit = 1024 // kb
+    kFileSizeLimit = 4096, // kb
+    kOldLogFiles = 2 // how many full log files are kept
 };
 
 StopLogOutputter::StopLogOutputter()
@@ -275,9 +276,14 @@ FileLogOutputter::write(ELevel level, const char *message)
     m_handle.close();
 
     if (moveFile) {
-        std::string oldLogFilename = inputleap::string::sprintf("%s.1", m_fileName.c_str());
-        remove(oldLogFilename.c_str());
-        rename(m_fileName.c_str(), oldLogFilename.c_str());
+        // shift the old files up by one: .1 becomes .2 and so on, the oldest is dropped
+        for (int i = kOldLogFiles; i >= 1; --i) {
+            std::string older = inputleap::string::sprintf("%s.%d", m_fileName.c_str(), i);
+            std::string newer = i == 1 ? m_fileName
+                                       : inputleap::string::sprintf("%s.%d", m_fileName.c_str(), i - 1);
+            remove(older.c_str());
+            rename(newer.c_str(), older.c_str());
+        }
     }
 
     return true;
