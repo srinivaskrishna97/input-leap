@@ -231,7 +231,8 @@ SecureSocket::doWrite()
     }
 
     if (bufferSize == 0) {
-        return kRetry;
+        // nothing to write (the job was made before the buffer drained): stop polling to write
+        return kNew;
     }
 
     status = secureWrite(do_write_retry_buffer_.get(), bufferSize, bytesWrote);
@@ -732,6 +733,11 @@ MultiplexerJobStatus SecureSocket::serviceConnect(ISocketMultiplexerJob* job,
 
     std::lock_guard<std::mutex> lock(tcp_mutex_);
 
+    if (getSocket() == nullptr) {
+        // closed while this job was pending
+        return {false, {}};
+    }
+
     int status = 0;
 #ifdef SYSAPI_WIN32
     status = secureConnect(static_cast<int>(getSocket()->m_socket));
@@ -768,6 +774,11 @@ MultiplexerJobStatus SecureSocket::serviceAccept(ISocketMultiplexerJob* job,
     (void) error;
 
     std::lock_guard<std::mutex> lock(tcp_mutex_);
+
+    if (getSocket() == nullptr) {
+        // closed while this job was pending
+        return {false, {}};
+    }
 
     int status = 0;
 #ifdef SYSAPI_WIN32

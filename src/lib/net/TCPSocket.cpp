@@ -97,21 +97,29 @@ TCPSocket::close()
 {
     LOG_DEBUG("Closing socket: %p", m_socket);
 
-    // remove ourself from the multiplexer
-    setJob(nullptr);
+    ArchSocket socket = nullptr;
+    {
+        // another thread writing to this socket may be about to install a job for it; it must
+        // either be installed before the removal below or see that the socket is closed
+        std::lock_guard<std::mutex> job_lock(job_mutex_);
 
-    std::lock_guard<std::mutex> lock(tcp_mutex_);
+        // remove ourself from the multiplexer
+        removeJob();
 
-    // clear buffers and enter disconnected state
-    if (m_connected) {
-        sendEvent(EventType::SOCKET_DISCONNECTED);
+        std::lock_guard<std::mutex> lock(tcp_mutex_);
+
+        // clear buffers and enter disconnected state
+        if (m_connected) {
+            sendEvent(EventType::SOCKET_DISCONNECTED);
+        }
+        onDisconnected();
+
+        socket = m_socket;
+        m_socket = nullptr;
     }
-    onDisconnected();
 
     // close the socket
-    if (m_socket != nullptr) {
-        ArchSocket socket = m_socket;
-        m_socket = nullptr;
+    if (socket != nullptr) {
         try {
             ARCH->closeSocket(socket);
         }
@@ -151,7 +159,7 @@ std::uint32_t TCPSocket::read(void* buffer, std::uint32_t n)
 
 void TCPSocket::write(const void* buffer, std::uint32_t n)
 {
-    bool wasEmpty;
+    std::unique_ptr<ISocketMultiplexerJob> job;
     {
         std::lock_guard<std::mutex> lock(tcp_mutex_);
 
@@ -167,17 +175,21 @@ void TCPSocket::write(const void* buffer, std::uint32_t n)
         }
 
         // copy data to the output buffer
-        wasEmpty = (m_outputBuffer.getSize() == 0);
+        bool wasEmpty = (m_outputBuffer.getSize() == 0);
         m_outputBuffer.write(buffer, n);
 
         // there's data to write
         is_flushed_ = false;
+
+        if (!wasEmpty) {
+            // the current job is already waiting to write
+            return;
+        }
+        job = newJob();
     }
 
     // make sure we're waiting to write
-    if (wasEmpty) {
-        setJob(newJob());
-    }
+    setJob(std::move(job));
 }
 
 void
@@ -191,15 +203,18 @@ void
 TCPSocket::shutdownInput()
 {
     bool useNewJob = false;
+    std::unique_ptr<ISocketMultiplexerJob> job;
     {
         std::lock_guard<std::mutex> lock(tcp_mutex_);
 
         // shutdown socket for reading
-        try {
-            ARCH->closeSocketForRead(m_socket);
-        }
-        catch (XArchNetwork&) {
-            // ignore
+        if (m_socket != nullptr) {
+            try {
+                ARCH->closeSocketForRead(m_socket);
+            }
+            catch (XArchNetwork&) {
+                // ignore
+            }
         }
 
         // shutdown buffer for reading
@@ -207,10 +222,11 @@ TCPSocket::shutdownInput()
             sendEvent(EventType::STREAM_INPUT_SHUTDOWN);
             onInputShutdown();
             useNewJob = true;
+            job = newJob();
         }
     }
     if (useNewJob) {
-        setJob(newJob());
+        setJob(std::move(job));
     }
 }
 
@@ -218,15 +234,18 @@ void
 TCPSocket::shutdownOutput()
 {
     bool useNewJob = false;
+    std::unique_ptr<ISocketMultiplexerJob> job;
     {
         std::lock_guard<std::mutex> lock(tcp_mutex_);
 
         // shutdown socket for writing
-        try {
-            ARCH->closeSocketForWrite(m_socket);
-        }
-        catch (XArchNetwork&) {
-            // ignore
+        if (m_socket != nullptr) {
+            try {
+                ARCH->closeSocketForWrite(m_socket);
+            }
+            catch (XArchNetwork&) {
+                // ignore
+            }
         }
 
         // shutdown buffer for writing
@@ -234,10 +253,11 @@ TCPSocket::shutdownOutput()
             sendEvent(EventType::STREAM_OUTPUT_SHUTDOWN);
             onOutputShutdown();
             useNewJob = true;
+            job = newJob();
         }
     }
     if (useNewJob) {
-        setJob(newJob());
+        setJob(std::move(job));
     }
 }
 
@@ -265,6 +285,7 @@ std::uint32_t TCPSocket::getSize() const
 void
 TCPSocket::connect(const NetworkAddress& addr)
 {
+    std::unique_ptr<ISocketMultiplexerJob> job;
     {
         std::lock_guard<std::mutex> lock(tcp_mutex_);
 
@@ -287,8 +308,9 @@ TCPSocket::connect(const NetworkAddress& addr)
         catch (XArchNetwork& e) {
             throw XSocketConnect(e.what());
         }
+        job = newJob();
     }
-    setJob(newJob());
+    setJob(std::move(job));
 }
 
 void
@@ -369,6 +391,10 @@ TCPSocket::doWrite()
     int bytesWrote = 0;
 
     bufferSize = m_outputBuffer.getSize();
+    if (bufferSize == 0) {
+        // nothing to write (the job was made before the buffer drained): stop polling to write
+        return kNew;
+    }
     const void* buffer = m_outputBuffer.peek(bufferSize);
     bytesWrote = static_cast<std::uint32_t>(ARCH->writeSocket(m_socket, buffer, bufferSize));
 
@@ -388,7 +414,10 @@ void TCPSocket::removeJob()
 
 void TCPSocket::setJob(std::unique_ptr<ISocketMultiplexerJob>&& job)
 {
-    if (job.get() == nullptr) {
+    // A job may have been made while the socket was open and close() may have run since then
+    // on another thread. Installing it would make the multiplexer use the closed socket.
+    std::lock_guard<std::mutex> job_lock(job_mutex_);
+    if (job.get() == nullptr || m_socket == nullptr) {
         removeJob();
     } else {
         m_socketMultiplexer->addSocket(this, std::move(job));
@@ -498,6 +527,11 @@ MultiplexerJobStatus TCPSocket::serviceConnecting(ISocketMultiplexerJob* job, bo
 
     std::lock_guard<std::mutex> lock(tcp_mutex_);
 
+    if (m_socket == nullptr) {
+        // closed while this job was pending
+        return {false, {}};
+    }
+
     // should only check for errors if error is true but checking a new
     // socket (and a socket that's connecting should be new) for errors
     // should be safe and Mac OS X appears to have a bug where a
@@ -542,6 +576,11 @@ MultiplexerJobStatus TCPSocket::serviceConnected(ISocketMultiplexerJob* job,
     (void) job;
 
     std::lock_guard<std::mutex> lock(tcp_mutex_);
+
+    if (m_socket == nullptr) {
+        // closed while this job was pending
+        return {false, {}};
+    }
 
     if (error) {
         sendEvent(EventType::SOCKET_DISCONNECTED);

@@ -108,6 +108,10 @@ protected:
     mutable std::mutex tcp_mutex_;
 private:
     ArchSocket m_socket;
+    // Serializes installing a multiplexer job with close(), so that a job computed while the
+    // socket was open is never installed after it was closed (it would use the closed socket).
+    // Never taken by the multiplexer thread.
+    std::mutex job_mutex_;
     std::condition_variable flushed_cv_;
     bool is_flushed_ = true;
     SocketMultiplexer* m_socketMultiplexer;
