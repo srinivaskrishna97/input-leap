@@ -286,6 +286,13 @@ extern const char*        kMsgCClipboardCapabilities;
 // the client did not see the contents arrive.
 extern const char*        kMsgDClipboardAge;
 
+// monitors:  secondary -> primary
+// the monitors of the client's screen, see MonitorLayout::encode().  sent after kMsgDInfo
+// once the server has sent the kOptionMonitorLayout option, and again whenever the screen's
+// shape changes.  the server then keeps the cursor on the monitors instead of anywhere in
+// the rectangle around them.  $1 = the encoded layout.
+extern const char*        kMsgDMonitors;
+
 // client data:  secondary -> primary
 // $1 = coordinate of leftmost pixel on secondary screen,
 // $2 = coordinate of topmost pixel on secondary screen,

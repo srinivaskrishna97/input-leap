@@ -44,6 +44,7 @@ public:
     MOCK_CONST_METHOD1(getClipboardSnapshot, MarshalledClipboardPtr(ClipboardID));
     MOCK_CONST_METHOD1(getClipboardSnapshotAge, std::uint32_t(ClipboardID));
     MOCK_CONST_METHOD0(supportsClipboardOffers, bool());
+    MOCK_CONST_METHOD0(getMonitors, MonitorLayout());
 };
 
 } // namespace inputleap

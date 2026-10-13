@@ -507,6 +507,11 @@ void Screen::getShape(std::int32_t& x, std::int32_t& y, std::int32_t& w, std::in
     m_screen->getShape(x, y, w, h);
 }
 
+MonitorLayout Screen::getMonitors() const
+{
+    return m_screen->getMonitors();
+}
+
 void Screen::getCursorPos(std::int32_t& x, std::int32_t& y) const
 {
     m_screen->getCursorPos(x, y);

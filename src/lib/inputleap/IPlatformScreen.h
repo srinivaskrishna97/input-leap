@@ -21,6 +21,7 @@
 #include "inputleap/DragInformation.h"
 #include "inputleap/ClipboardData.h"
 #include "inputleap/clipboard_types.h"
+#include "inputleap/MonitorLayout.h"
 #include "inputleap/IScreen.h"
 #include "inputleap/IPrimaryScreen.h"
 #include "inputleap/ISecondaryScreen.h"
@@ -92,6 +93,13 @@ public:
     handling. Updates are applied in the order of the calls.
     */
     virtual bool setClipboardData(ClipboardID id, const MarshalledClipboardPtr& data) = 0;
+
+    //! Get the monitors of the screen
+    /*!
+    Returns the monitors in the screen's coordinates, or an empty layout if the platform does
+    not tell them apart.
+    */
+    virtual MonitorLayout getMonitors() const = 0;
 
     //! Test if the screen prepares clipboard snapshots
     /*!

@@ -37,6 +37,7 @@ public:
     bool hasClipboardSnapshots() const override;
     MarshalledClipboardPtr getClipboardSnapshot(ClipboardID id) const override;
     std::uint32_t getClipboardSnapshotAge(ClipboardID id) const override;
+    MonitorLayout getMonitors() const override;
     bool supportsClipboardOffers() const override;
     void setClipboardOffer(ClipboardID id, const ClipboardOffer& offer) override;
     void clipboardDataUnavailable(ClipboardID id, const ClipboardOffer& offer) override;

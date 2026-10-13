@@ -70,6 +70,8 @@ static const OptionID    kOptionWin32KeepForeground        = OPTION_CODE("_KFW")
 static const OptionID    kOptionClipboardSharing            = OPTION_CODE("CLPS");
 static const OptionID    kOptionClipboardSharingSize        = OPTION_CODE("CLSZ");
 static const OptionID    kOptionClipboardCapabilities    = OPTION_CODE("CLCP");
+// the server keeps the cursor on the monitors that a client reports with kMsgDMonitors
+static const OptionID    kOptionMonitorLayout            = OPTION_CODE("MONL");
 //@}
 
 //! @name Screen switch corner enumeration

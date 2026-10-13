@@ -71,6 +71,7 @@ public:
 
     // By default the clipboard is read and written synchronously on demand.
     bool setClipboardData(ClipboardID id, const MarshalledClipboardPtr& data) override;
+    MonitorLayout getMonitors() const override { return MonitorLayout(); }
     bool hasClipboardSnapshots() const override { return false; }
     MarshalledClipboardPtr getClipboardSnapshot(ClipboardID) const override { return nullptr; }
     std::uint32_t getClipboardSnapshotAge(ClipboardID) const override { return kClipboardAgeUnknown; }

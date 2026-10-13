@@ -19,6 +19,7 @@
 #pragma once
 
 #include "base/EventTarget.h"
+#include "inputleap/MonitorLayout.h"
 #include "inputleap/Fwd.h"
 #include "inputleap/IClient.h"
 #include "inputleap/ClipboardData.h"
@@ -61,6 +62,17 @@ public:
     Return if this proxy is for client or primary.
     */
     virtual bool isPrimary() const { return false; }
+
+    //! Get the monitors of the screen
+    /*!
+    Returns the monitors that the screen reported, or an empty layout if it did not report
+    them, in which case the whole shape counts as one monitor.
+    */
+    virtual const MonitorLayout& getMonitors() const
+    {
+        static const MonitorLayout none;
+        return none;
+    }
 
     //! Get clipboard contents in the marshalled form
     /*!

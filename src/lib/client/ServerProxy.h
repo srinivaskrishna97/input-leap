@@ -78,6 +78,9 @@ public:
     */
     void onClipboardAge(ClipboardID, std::uint32_t age_ms);
 
+    //! Tell the server the monitors of the screen, if the server asked for them
+    void sendMonitors();
+
     //! Ask the server for offered clipboard contents
     void requestClipboardData(ClipboardID, const ClipboardOffer& offer);
 
@@ -187,6 +190,8 @@ private:
 
     // optional clipboard protocol features negotiated with the server (kClipboardCap*)
     std::uint32_t m_clipboardCaps = 0;
+    // whether the server wants the monitors of the screen, see kOptionMonitorLayout
+    bool m_sendMonitors = false;
 
     // clipboard data being received from the server with kMsgDClipboardData
     ClipboardTransferReceiver m_clipboardReceiver{(std::numeric_limits<std::size_t>::max)()};

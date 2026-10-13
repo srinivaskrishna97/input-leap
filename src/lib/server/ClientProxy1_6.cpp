@@ -272,6 +272,9 @@ bool ClientProxy1_6::parseMessage(const std::uint8_t* code)
     else if (memcmp(code, kMsgDClipboardAge, 4) == 0) {
         return recvClipboardAge();
     }
+    else if (memcmp(code, kMsgDMonitors, 4) == 0) {
+        return recvMonitors();
+    }
     return false;
 }
 
@@ -687,6 +690,27 @@ bool ClientProxy1_6::recvClipboardDataRequest()
 
     m_events->add_event(EventType::CLIPBOARD_DATA_REQUESTED, get_event_target(),
                         create_event_data<ClipboardOfferInfo>(info));
+    return true;
+}
+
+const MonitorLayout& ClientProxy1_6::getMonitors() const
+{
+    return m_monitors;
+}
+
+bool ClientProxy1_6::recvMonitors()
+{
+    std::string data;
+    if (!ProtocolUtil::readf(getStream(), kMsgDMonitors + 4, &data)) {
+        return false;
+    }
+    MonitorLayout layout;
+    if (!MonitorLayout::decode(data, layout)) {
+        LOG_WARN("ignoring an invalid monitor layout from client \"%s\"", getName().c_str());
+        return true;
+    }
+    m_monitors = layout;
+    LOG_DEBUG("client \"%s\" monitors: %s", getName().c_str(), layout.describe().c_str());
     return true;
 }
 

@@ -408,6 +408,10 @@ void Server::switchScreen(BaseClientProxy* dst, std::int32_t x, std::int32_t y, 
 #endif
 	assert(m_active != nullptr);
 
+	// land on a monitor of the screen; the point is on the edge of the rectangle around its
+	// monitors, where there may be none
+	dst->getMonitors().clamp(x, y);
+
 	LOG_INFO("switch from \"%s\" to \"%s\" at %d,%d", getName(m_active).c_str(), getName(dst).c_str(), x, y);
 
 	// stop waiting to switch
@@ -1068,6 +1072,11 @@ Server::sendOptions(BaseClientProxy* client) const
 	// that support any of them reply with kMsgCClipboardCapabilities, older clients ignore it.
 	optionsList.push_back(kOptionClipboardCapabilities);
 	optionsList.push_back(kClipboardCapsSupported);
+
+	// clients that report their monitors get the cursor kept on them, see kMsgDMonitors.
+	// older clients ignore the option.
+	optionsList.push_back(kOptionMonitorLayout);
+	optionsList.push_back(1);
 
 	// send the options
 	client->resetOptions();
@@ -2329,6 +2338,10 @@ void Server::onMouseMoveSecondary(std::int32_t dx, std::int32_t dy)
 			m_y = ay + ah - 1;
 			LOG_DEBUG2("clamp to bottom of \"%s\"", getName(m_active).c_str());
 		}
+
+		// keep the cursor on the screen's monitors, if they are known: a move into the part of
+		// the shape without a monitor slides along the edge of the monitor the cursor is on
+		m_active->getMonitors().constrain(xOld, yOld, m_x, m_y);
 
 		// warp cursor if it moved.
 		if (m_x != xOld || m_y != yOld) {

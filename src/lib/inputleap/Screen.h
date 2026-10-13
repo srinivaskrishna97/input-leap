@@ -350,6 +350,12 @@ public:
                   std::int32_t& height) const override;
     void getCursorPos(std::int32_t& x, std::int32_t& y) const override;
 
+    //! Get the monitors of the screen
+    /*!
+    See IPlatformScreen::getMonitors().
+    */
+    virtual MonitorLayout getMonitors() const;
+
     IPlatformScreen* getPlatformScreen() { return m_screen.get(); }
 
 protected:

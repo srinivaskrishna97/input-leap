@@ -515,6 +515,33 @@ std::uint32_t MSWindowsScreen::getClipboardSnapshotAge(ClipboardID) const
     return m_clipboardWorker->snapshot_age_ms();
 }
 
+namespace {
+
+BOOL CALLBACK collect_monitor(HMONITOR monitor, HDC, LPRECT, LPARAM param)
+{
+    MONITORINFO info;
+    info.cbSize = sizeof(info);
+    if (GetMonitorInfoW(monitor, &info)) {
+        MonitorRect rect;
+        rect.x = info.rcMonitor.left;
+        rect.y = info.rcMonitor.top;
+        rect.w = info.rcMonitor.right - info.rcMonitor.left;
+        rect.h = info.rcMonitor.bottom - info.rcMonitor.top;
+        reinterpret_cast<MonitorLayout*>(param)->add(rect);
+    }
+    return TRUE;
+}
+
+} // namespace
+
+MonitorLayout MSWindowsScreen::getMonitors() const
+{
+    // in the same coordinates as getShape(): those of the virtual screen
+    MonitorLayout layout;
+    EnumDisplayMonitors(nullptr, nullptr, collect_monitor, reinterpret_cast<LPARAM>(&layout));
+    return layout;
+}
+
 void MSWindowsScreen::handle_clipboard_captured()
 {
     sendClipboardEvent(EventType::CLIPBOARD_CHANGED, kClipboardClipboard);

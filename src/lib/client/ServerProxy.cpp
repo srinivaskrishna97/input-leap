@@ -552,6 +552,21 @@ ServerProxy::sendInfo(const ClientInfo& info)
                                 info.m_x, info.m_y,
                                 info.m_w, info.m_h, 0,
                                 info.m_mx, info.m_my);
+    sendMonitors();
+}
+
+void ServerProxy::sendMonitors()
+{
+    if (!m_sendMonitors) {
+        return;
+    }
+    MonitorLayout layout = m_client->getMonitors();
+    if (layout.empty()) {
+        return;
+    }
+    LOG_DEBUG("sending monitors: %s", layout.describe().c_str());
+    std::string data = layout.encode();
+    ProtocolUtil::writef(m_stream, kMsgDMonitors, &data);
 }
 
 KeyID
@@ -1011,6 +1026,11 @@ ServerProxy::setOptions()
                 LOG_DEBUG("using clipboard capabilities 0x%x", caps);
                 ProtocolUtil::writef(m_stream, kMsgCClipboardCapabilities, caps);
             }
+        }
+        else if (options[i] == kOptionMonitorLayout) {
+            // the server keeps the cursor on the monitors it is told about
+            m_sendMonitors = options[i + 1] != 0;
+            sendMonitors();
         }
 
         if (id != kKeyModifierIDNull) {

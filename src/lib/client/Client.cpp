@@ -203,6 +203,11 @@ Client::handshakeComplete()
     send_event(EventType::CLIENT_CONNECTED);
 }
 
+MonitorLayout Client::getMonitors() const
+{
+    return m_screen->getMonitors();
+}
+
 bool Client::serverComparesClipboardAges() const
 {
     return m_server != nullptr && (m_server->clipboardCapabilities() & kClipboardCapAge) != 0;

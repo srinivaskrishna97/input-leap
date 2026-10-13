@@ -83,6 +83,13 @@ MarshalledClipboardPtr PlatformScreenLoggingWrapper::getClipboardSnapshot(Clipbo
     return result;
 }
 
+MonitorLayout PlatformScreenLoggingWrapper::getMonitors() const
+{
+    auto result = screen_->getMonitors();
+    LOG_DEBUG1("PlatformScreen::getMonitors() => %s", result.describe().c_str());
+    return result;
+}
+
 std::uint32_t PlatformScreenLoggingWrapper::getClipboardSnapshotAge(ClipboardID id) const
 {
     auto result = screen_->getClipboardSnapshotAge(id);

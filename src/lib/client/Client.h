@@ -24,6 +24,7 @@
 #include "inputleap/IClient.h"
 #include "inputleap/Clipboard.h"
 #include "inputleap/ClipboardData.h"
+#include "inputleap/MonitorLayout.h"
 #include "inputleap/DragInformation.h"
 #include "inputleap/INode.h"
 #include "inputleap/ClientArgs.h"
@@ -134,6 +135,8 @@ public:
     bool getClipboard(ClipboardID id, IClipboard*) const override;
     void getShape(std::int32_t& x, std::int32_t& y, std::int32_t& width,
                   std::int32_t& height) const override;
+    //! The monitors of the screen, see MonitorLayout
+    MonitorLayout getMonitors() const;
     void getCursorPos(std::int32_t& x, std::int32_t& y) const override;
 
     // IClient overrides

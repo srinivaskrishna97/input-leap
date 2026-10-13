@@ -115,6 +115,7 @@ public:
     virtual void leave();
     virtual bool setClipboard(ClipboardID, const IClipboard*);
     bool setClipboardData(ClipboardID id, const MarshalledClipboardPtr& data) override;
+    MonitorLayout getMonitors() const override;
     bool hasClipboardSnapshots() const override;
     MarshalledClipboardPtr getClipboardSnapshot(ClipboardID id) const override;
     std::uint32_t getClipboardSnapshotAge(ClipboardID id) const override;
