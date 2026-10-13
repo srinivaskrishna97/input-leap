@@ -518,10 +518,10 @@ MSWindowsDesks::deskEnter(Desk* desk)
     if (!m_isPrimary) {
         ReleaseCapture();
 
-        // The cursor was parked at the center of the screen while it was hidden, and the move
-        // to the point where it enters is injected as input, which is processed asynchronously.
-        // Put the cursor there right away so that it does not show up at the center first when
-        // the injected move is still being processed.
+        // The cursor stayed hidden where it left the screen, and the move to the point where it
+        // enters is injected as input, which is processed asynchronously.  Put the cursor there
+        // right away so that it does not show up at its old position first while the injected
+        // move is still being processed.
         POINT pos;
         if (m_haveLastFakeMove && GetCursorPos(&pos) &&
             (pos.x != m_lastFakeX || pos.y != m_lastFakeY)) {
@@ -585,9 +585,32 @@ MSWindowsDesks::deskLeave(Desk* desk, HKL keyLayout)
         ActivateKeyboardLayout(keyLayout, 0);
     }
     else {
-        // move hider window under the cursor center, raise, and show it
+        // Hide the cursor where it is.  It used to be parked at the center of the screen, but
+        // the move there is injected as input, which Windows processes a moment later, and the
+        // cursor flashed up at the center every time it left this screen.  Where the cursor
+        // left is also where a local user expects to find it.  The target of the last injected
+        // move is used because the move that took the cursor there may still be on its way.
+        POINT pos;
+        bool keepPosition = false;
+        if (m_haveLastFakeMove) {
+            pos.x = m_lastFakeX;
+            pos.y = m_lastFakeY;
+            keepPosition = true;
+            // later leaves without moves in between, e.g. on desk switches, use the actual
+            // position
+            m_haveLastFakeMove = false;
+        }
+        else {
+            keepPosition = GetCursorPos(&pos) != 0;
+        }
+        if (!keepPosition) {
+            pos.x = m_xCenter;
+            pos.y = m_yCenter;
+        }
+
+        // move hider window under the cursor, raise, and show it
         SetWindowPos(desk->m_window, HWND_TOP,
-                            m_xCenter, m_yCenter, 1, 1,
+                            pos.x, pos.y, 1, 1,
                             SWP_NOACTIVATE | SWP_SHOWWINDOW);
 
         // watch for mouse motion.  if we see any then we hide the
@@ -596,9 +619,11 @@ MSWindowsDesks::deskLeave(Desk* desk, HKL keyLayout)
         // we aren't notified when the mouse leaves our window.
         SetCapture(desk->m_window);
 
-        // warp the mouse to the cursor center
-        LOG_DEBUG2("warping cursor to center: %+d,%+d", m_xCenter, m_yCenter);
-        deskMouseMove(m_xCenter, m_yCenter);
+        if (!keepPosition) {
+            // warp the mouse to the cursor center
+            LOG_DEBUG2("warping cursor to center: %+d,%+d", m_xCenter, m_yCenter);
+            deskMouseMove(m_xCenter, m_yCenter);
+        }
     }
 }
 
