@@ -1,0 +1,54 @@
+/*
+ * InputLeap -- mouse and keyboard sharing utility
+ *
+ * This package is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU General Public License
+ * found in the file LICENSE that should have accompanied this file.
+ *
+ * This package is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ */
+
+#pragma once
+
+#include <cstddef>
+#include <cstdint>
+#include <string>
+
+namespace inputleap {
+
+/*! Messages between the core and its clipboard helper on Windows.
+
+    On Windows, a server or client that the service started runs with high privileges, and
+    Windows withholds clipboard contents that applications hand over on request from such a
+    process. The core therefore starts a helper program as the user, which captures the
+    clipboard and sends the contents to the core. The messages are sent with WM_COPYDATA; the
+    identifiers below go in dwData and the payloads encoded here in lpData.
+*/
+//@{
+
+/// helper -> core: the helper has started. Payload: its window and process, see encode_clipboard_helper_hello().
+constexpr std::uint32_t kClipboardHelperHelloMagic = 0x494C4348;   // "ILCH"
+/// core -> helper: capture the clipboard now. No payload.
+constexpr std::uint32_t kClipboardHelperRequestMagic = 0x494C4352; // "ILCR"
+/// helper -> core: the captured contents. Payload: see encode_clipboard_capture().
+constexpr std::uint32_t kClipboardHelperCaptureMagic = 0x494C4343; // "ILCC"
+
+/// The clipboard sequence number (4 bytes, little endian) followed by the marshalled contents.
+std::string encode_clipboard_capture(std::uint32_t sequence, const std::string& data);
+bool decode_clipboard_capture(const void* bytes, std::size_t size, std::uint32_t& sequence,
+                              std::string& data);
+
+/// The helper's window handle (8 bytes) and process id (4 bytes), little endian.
+std::string encode_clipboard_helper_hello(std::uint64_t window, std::uint32_t pid);
+bool decode_clipboard_helper_hello(const void* bytes, std::size_t size, std::uint64_t& window,
+                                   std::uint32_t& pid);
+
+//@}
+
+} // namespace inputleap

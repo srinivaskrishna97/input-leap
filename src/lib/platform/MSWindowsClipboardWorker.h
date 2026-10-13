@@ -49,6 +49,12 @@ worker for the data, the worker sends a CLIPBOARD_DATA_REQUESTED event and waits
 is supplied with deliver(). Only the pasting application waits; input handling continues.
 
 All writes to the clipboard go through the worker so that they are applied in order.
+
+When the process runs with high privileges (the service started it), Windows withholds
+contents that applications hand over on request, such as file lists and the text and images
+of many applications. The worker then starts a helper program as the user, which captures the
+clipboard and sends the contents to the worker, see ClipboardHelperMessages.h. The worker
+captures by itself only if the helper does not answer.
 */
 class MSWindowsClipboardWorker {
 public:
@@ -139,6 +145,14 @@ private:
     void post(UINT msg);
     void post_capture();
     void enqueue(Command command);
+    void start_helper();
+    void stop_helper();
+    void check_helper();
+    bool helper_running() const;
+    bool request_helper_capture();
+    void on_helper_hello(const COPYDATASTRUCT* data);
+    void on_helper_capture(const COPYDATASTRUCT* data);
+    void capture_locally();
     void process_commands();
     bool apply_now(const MarshalledClipboardPtr& data);
     bool clear_now();
@@ -187,6 +201,14 @@ private:
     int apply_retries_ = 0;
     // how often the current capture found nothing and waited for the GUI's file list
     int empty_capture_waits_ = 0;
+
+    // the helper that captures the clipboard as the user, if one is used
+    HANDLE helper_process_ = nullptr;
+    DWORD helper_pid_ = 0;
+    HWND helper_window_ = nullptr;
+    int helper_starts_ = 0;
+    // whether the helper was asked for a capture that has not arrived yet
+    bool helper_capture_expected_ = false;
 };
 
 } // namespace inputleap

@@ -513,7 +513,8 @@ MSWindowsWatchdog::shutdownExistingProcesses()
     // e.g. by an instance of the service that crashed, were never shut down.  A second client
     // with the same name is refused by the server and keeps retrying, and a second server cannot
     // use the port while the copy left behind keeps running an outdated configuration.
-    static const char* const kProgramNames[] = { "input-leaps.exe", "input-leapc.exe" };
+    static const char* const kProgramNames[] = { "input-leaps.exe", "input-leapc.exe",
+                                                 "input-leap-clipboard.exe" };
 
     while (gotEntry) {
 

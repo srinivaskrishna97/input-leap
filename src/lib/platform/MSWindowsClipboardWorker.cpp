@@ -16,6 +16,9 @@
 
 #include "platform/MSWindowsClipboardWorker.h"
 
+#include "inputleap/ClipboardHelperMessages.h"
+#include "platform/MSWindowsLocalPeer.h"
+
 #include "platform/MSWindowsClipboard.h"
 #include "inputleap/Clipboard.h"
 #include "inputleap/ClipboardFiles.h"
@@ -39,6 +42,15 @@ const UINT kClipboardWorkerMsgCapture = WM_APP + 2;
 // timer identifiers
 const UINT_PTR kClipboardWorkerCaptureTimer = 1;
 const UINT_PTR kClipboardWorkerRetryTimer = 2;
+const UINT_PTR kClipboardWorkerHelperFallbackTimer = 3;
+const UINT_PTR kClipboardWorkerHelperWatchTimer = 4;
+
+// The helper that captures the clipboard as the user, see ClipboardHelperMessages.h. If it
+// does not answer a request for a capture in time, the worker captures by itself.
+const wchar_t* const kClipboardHelperProgram = L"input-leap-clipboard.exe";
+const UINT kClipboardHelperFallbackMs = 1500;
+const UINT kClipboardHelperWatchMs = 3000;
+const int kClipboardHelperMaxStarts = 10;
 
 // Applications often update the clipboard several times in quick succession, so a capture is
 // started only after the clipboard has been quiet for a short while.
@@ -140,6 +152,8 @@ bool MSWindowsClipboardWorker::create_window()
 
 void MSWindowsClipboardWorker::thread_main()
 {
+    start_helper();
+
     MSG msg;
     while (GetMessageW(&msg, nullptr, 0, 0) > 0) {
         TranslateMessage(&msg);
@@ -184,12 +198,31 @@ LRESULT MSWindowsClipboardWorker::handle_message(UINT msg, WPARAM wparam, LPARAM
         } else if (wparam == kClipboardWorkerRetryTimer) {
             KillTimer(window_, kClipboardWorkerRetryTimer);
             process_commands();
+        } else if (wparam == kClipboardWorkerHelperFallbackTimer) {
+            KillTimer(window_, kClipboardWorkerHelperFallbackTimer);
+            if (helper_capture_expected_) {
+                LOG_DEBUG("the clipboard helper did not answer, capturing here");
+                helper_capture_expected_ = false;
+                capture_locally();
+            }
+        } else if (wparam == kClipboardWorkerHelperWatchTimer) {
+            check_helper();
         }
         return 0;
 
-    case WM_COPYDATA:
+    case WM_COPYDATA: {
+        const auto* data = reinterpret_cast<const COPYDATASTRUCT*>(lparam);
+        if (data != nullptr && data->dwData == kClipboardHelperHelloMagic) {
+            on_helper_hello(data);
+            return TRUE;
+        }
+        if (data != nullptr && data->dwData == kClipboardHelperCaptureMagic) {
+            on_helper_capture(data);
+            return TRUE;
+        }
         // the GUI, which runs as the user, sends the paths of the files on the clipboard
-        return on_copy_data(reinterpret_cast<const COPYDATASTRUCT*>(lparam)) ? TRUE : FALSE;
+        return on_copy_data(data) ? TRUE : FALSE;
+    }
 
     case WM_RENDERFORMAT:
         // an application requests the data of offered contents
@@ -213,6 +246,7 @@ LRESULT MSWindowsClipboardWorker::handle_message(UINT msg, WPARAM wparam, LPARAM
         return 0;
 
     case WM_DESTROY:
+        stop_helper();
         PostQuitMessage(0);
         return 0;
 
@@ -693,6 +727,146 @@ void MSWindowsClipboardWorker::render_all_formats()
     CloseClipboard();
 }
 
+void MSWindowsClipboardWorker::start_helper()
+{
+    if (!MSWindowsLocalPeer::running_elevated()) {
+        LOG_DEBUG("not starting the clipboard helper, this process is not elevated");
+        return;
+    }
+    if (helper_starts_ >= kClipboardHelperMaxStarts) {
+        LOG_WARN("not starting the clipboard helper again, it keeps exiting");
+        return;
+    }
+    ++helper_starts_;
+
+    std::string program = MSWindowsLocalPeer::program_directory() + "\\" +
+                          fs::path(kClipboardHelperProgram).u8string();
+    std::string command = "\"" + program + "\" " + std::to_string(GetCurrentProcessId()) + " " +
+                          std::to_string(reinterpret_cast<std::uintptr_t>(window_));
+    helper_process_ = MSWindowsLocalPeer::start_as_console_user(command);
+    if (helper_process_ == nullptr) {
+        LOG_WARN("cannot start the clipboard helper %s", program.c_str());
+        return;
+    }
+    helper_pid_ = GetProcessId(helper_process_);
+    LOG_INFO("started the clipboard helper as the user, pid=%lu",
+             static_cast<unsigned long>(helper_pid_));
+    SetTimer(window_, kClipboardWorkerHelperWatchTimer, kClipboardHelperWatchMs, nullptr);
+}
+
+void MSWindowsClipboardWorker::stop_helper()
+{
+    KillTimer(window_, kClipboardWorkerHelperWatchTimer);
+    KillTimer(window_, kClipboardWorkerHelperFallbackTimer);
+    if (helper_process_ == nullptr) {
+        return;
+    }
+    if (helper_window_ != nullptr) {
+        PostMessageW(helper_window_, WM_CLOSE, 0, 0);
+    }
+    if (WaitForSingleObject(helper_process_, 1000) != WAIT_OBJECT_0) {
+        TerminateProcess(helper_process_, 0);
+    }
+    CloseHandle(helper_process_);
+    helper_process_ = nullptr;
+    helper_window_ = nullptr;
+    helper_pid_ = 0;
+    helper_capture_expected_ = false;
+}
+
+bool MSWindowsClipboardWorker::helper_running() const
+{
+    return helper_process_ != nullptr && WaitForSingleObject(helper_process_, 0) == WAIT_TIMEOUT;
+}
+
+void MSWindowsClipboardWorker::check_helper()
+{
+    if (helper_process_ == nullptr || helper_running()) {
+        return;
+    }
+    LOG_WARN("the clipboard helper exited, starting it again");
+    CloseHandle(helper_process_);
+    helper_process_ = nullptr;
+    helper_window_ = nullptr;
+    helper_pid_ = 0;
+    helper_capture_expected_ = false;
+    start_helper();
+}
+
+bool MSWindowsClipboardWorker::request_helper_capture()
+{
+    COPYDATASTRUCT data;
+    data.dwData = kClipboardHelperRequestMagic;
+    data.cbData = 0;
+    data.lpData = nullptr;
+    DWORD_PTR result = 0;
+    if (!SendMessageTimeoutW(helper_window_, WM_COPYDATA, reinterpret_cast<WPARAM>(window_),
+                             reinterpret_cast<LPARAM>(&data), SMTO_ABORTIFHUNG | SMTO_BLOCK, 1000,
+                             &result)) {
+        LOG_DEBUG("the clipboard helper does not take requests (error %lu)", GetLastError());
+        return false;
+    }
+    return result != 0;
+}
+
+void MSWindowsClipboardWorker::on_helper_hello(const COPYDATASTRUCT* data)
+{
+    std::uint64_t window = 0;
+    std::uint32_t pid = 0;
+    if (!decode_clipboard_helper_hello(data->lpData, data->cbData, window, pid)) {
+        LOG_WARN("ignoring a malformed hello from a clipboard helper");
+        return;
+    }
+    if (helper_pid_ != 0 && pid != helper_pid_) {
+        LOG_WARN("ignoring a hello from process %lu, the clipboard helper is process %lu",
+                 static_cast<unsigned long>(pid), static_cast<unsigned long>(helper_pid_));
+        return;
+    }
+    helper_window_ = reinterpret_cast<HWND>(static_cast<std::uintptr_t>(window));
+    LOG_DEBUG("the clipboard helper is ready");
+}
+
+void MSWindowsClipboardWorker::on_helper_capture(const COPYDATASTRUCT* data)
+{
+    std::uint32_t sequence = 0;
+    std::string bytes;
+    if (!decode_clipboard_capture(data->lpData, data->cbData, sequence, bytes)) {
+        LOG_WARN("ignoring a malformed capture from the clipboard helper");
+        return;
+    }
+    KillTimer(window_, kClipboardWorkerHelperFallbackTimer);
+    helper_capture_expected_ = false;
+
+    if (sequence != GetClipboardSequenceNumber()) {
+        // the clipboard changed again; another capture follows
+        LOG_DEBUG("ignoring an outdated capture from the clipboard helper");
+        return;
+    }
+
+    MarshalledClipboardPtr contents = make_marshalled_clipboard(std::move(bytes));
+    // prepare the compressed form now, so that sending it later does not have to
+    if (contents->size() >= kClipboardEagerSize) {
+        contents->rle32();
+    }
+    bool has_files =
+        (marshalled_clipboard_formats(contents->data()) & (1u << IClipboard::kFiles)) != 0;
+
+    capture_retries_ = 0;
+    empty_capture_waits_ = 0;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        snapshot_ = contents;
+        snapshot_sequence_ = sequence;
+        snapshot_has_files_ = has_files;
+        snapshot_age_known_ = notified_ && notified_sequence_ == sequence;
+        snapshot_changed_ = notified_time_;
+        capture_pending_ = false;
+    }
+
+    LOG_DEBUG("captured clipboard through the helper, size=%zu", contents->size());
+    events_->add_event(EventType::CLIPBOARD_CAPTURED, &target_);
+}
+
 void MSWindowsClipboardWorker::schedule_capture(UINT delay_ms)
 {
     // restarts the timer if it is already running
@@ -700,6 +874,37 @@ void MSWindowsClipboardWorker::schedule_capture(UINT delay_ms)
 }
 
 void MSWindowsClipboardWorker::capture_now()
+{
+    // the helper, which runs as the user, sees contents that Windows withholds from this
+    // process; this process captures by itself only if the helper does not answer in time
+    if (helper_window_ != nullptr && helper_running()) {
+        if (helper_capture_expected_) {
+            // an answer is on its way
+            return;
+        }
+        if (MSWindowsClipboard::is_owned_by_us()) {
+            std::lock_guard<std::mutex> lock(mutex_);
+            capture_pending_ = false;
+            return;
+        }
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            if (snapshot_ && snapshot_sequence_ == GetClipboardSequenceNumber()) {
+                capture_pending_ = false;
+                return;
+            }
+        }
+        if (request_helper_capture()) {
+            helper_capture_expected_ = true;
+            SetTimer(window_, kClipboardWorkerHelperFallbackTimer, kClipboardHelperFallbackMs,
+                     nullptr);
+            return;
+        }
+    }
+    capture_locally();
+}
+
+void MSWindowsClipboardWorker::capture_locally()
 {
     DWORD sequence = GetClipboardSequenceNumber();
 

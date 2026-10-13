@@ -24,6 +24,7 @@ add_subdirectory(server)
 
 if (WIN32)
     add_subdirectory(daemon)
+    add_subdirectory(clipboard-helper)
 endif()
 
 if(INPUTLEAP_BUILD_TESTS)

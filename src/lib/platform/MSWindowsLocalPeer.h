@@ -44,6 +44,13 @@ public:
 
     /// The folder of the running program.
     static std::string program_directory();
+
+    /// Whether this process runs with high or system integrity, e.g. started by the service.
+    static bool running_elevated();
+
+    /*! Starts a program as the user at the console, in their session and without a window.
+        Returns the process handle (a HANDLE), or nullptr if it could not be started. */
+    static void* start_as_console_user(const std::string& command_line);
 };
 
 } // namespace inputleap

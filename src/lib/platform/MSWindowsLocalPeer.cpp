@@ -22,6 +22,8 @@
 #define WIN32_LEAN_AND_MEAN
 #include <Windows.h>
 #include <Shlobj.h>
+#include <Tlhelp32.h>
+#include <Userenv.h>
 #include <Wtsapi32.h>
 
 #include <vector>
@@ -199,6 +201,117 @@ std::string MSWindowsLocalPeer::console_user_local_appdata()
     std::string result = to_utf8(folder);
     CoTaskMemFree(folder);
     return result;
+}
+
+bool MSWindowsLocalPeer::running_elevated()
+{
+    Handle token;
+    if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token.value)) {
+        return false;
+    }
+    DWORD size = 0;
+    GetTokenInformation(token.value, TokenIntegrityLevel, nullptr, 0, &size);
+    if (size == 0) {
+        return false;
+    }
+    std::vector<BYTE> buffer(size);
+    if (!GetTokenInformation(token.value, TokenIntegrityLevel, buffer.data(), size, &size)) {
+        return false;
+    }
+    PSID sid = reinterpret_cast<TOKEN_MANDATORY_LABEL*>(buffer.data())->Label.Sid;
+    DWORD count = *GetSidSubAuthorityCount(sid);
+    if (count == 0) {
+        return false;
+    }
+    return *GetSidSubAuthority(sid, count - 1) >= SECURITY_MANDATORY_HIGH_RID;
+}
+
+namespace {
+
+// a primary token of the user at the console: from the session when running as the system,
+// otherwise the token of the user's shell in this session
+bool console_user_primary_token(Handle& token)
+{
+    if (WTSQueryUserToken(WTSGetActiveConsoleSessionId(), &token.value)) {
+        return true;
+    }
+    token.value = nullptr;
+
+    DWORD session = 0;
+    ProcessIdToSessionId(GetCurrentProcessId(), &session);
+    Handle snapshot;
+    snapshot.value = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (!snapshot.ok()) {
+        return false;
+    }
+    PROCESSENTRY32W entry;
+    entry.dwSize = sizeof(entry);
+    for (BOOL more = Process32FirstW(snapshot.value, &entry); more;
+         more = Process32NextW(snapshot.value, &entry)) {
+        DWORD process_session = 0;
+        if (_wcsicmp(entry.szExeFile, L"explorer.exe") != 0 ||
+            !ProcessIdToSessionId(entry.th32ProcessID, &process_session) ||
+            process_session != session) {
+            continue;
+        }
+        Handle process;
+        process.value = OpenProcess(PROCESS_QUERY_INFORMATION, FALSE, entry.th32ProcessID);
+        if (!process.ok()) {
+            continue;
+        }
+        Handle shell_token;
+        if (!OpenProcessToken(process.value, TOKEN_DUPLICATE | TOKEN_QUERY | TOKEN_ASSIGN_PRIMARY,
+                              &shell_token.value)) {
+            continue;
+        }
+        if (DuplicateTokenEx(shell_token.value, TOKEN_ALL_ACCESS, nullptr, SecurityImpersonation,
+                             TokenPrimary, &token.value)) {
+            return true;
+        }
+        token.value = nullptr;
+    }
+    return false;
+}
+
+} // namespace
+
+void* MSWindowsLocalPeer::start_as_console_user(const std::string& command_line)
+{
+    Handle token;
+    if (!console_user_primary_token(token)) {
+        LOG_DEBUG("cannot get a token of the console user to start a program");
+        return nullptr;
+    }
+    LPVOID environment = nullptr;
+    if (!CreateEnvironmentBlock(&environment, token.value, FALSE)) {
+        LOG_DEBUG("cannot create the environment for the console user (error %lu)", GetLastError());
+        return nullptr;
+    }
+
+    STARTUPINFOW startup;
+    ZeroMemory(&startup, sizeof(startup));
+    startup.cb = sizeof(startup);
+    wchar_t desktop[] = L"winsta0\\Default";
+    startup.lpDesktop = desktop;
+    PROCESS_INFORMATION process;
+    ZeroMemory(&process, sizeof(process));
+
+    // CreateProcess may modify the command line
+    std::wstring wide = to_wide(command_line);
+    std::vector<wchar_t> command(wide.begin(), wide.end());
+    command.push_back(L'\0');
+
+    BOOL ok = CreateProcessAsUserW(token.value, nullptr, command.data(), nullptr, nullptr, FALSE,
+                                   CREATE_NO_WINDOW | CREATE_UNICODE_ENVIRONMENT, environment,
+                                   nullptr, &startup, &process);
+    DWORD error = GetLastError();
+    DestroyEnvironmentBlock(environment);
+    if (!ok) {
+        LOG_DEBUG("cannot start %s as the console user (error %lu)", command_line.c_str(), error);
+        return nullptr;
+    }
+    CloseHandle(process.hThread);
+    return process.hProcess;
 }
 
 std::string MSWindowsLocalPeer::program_directory()
