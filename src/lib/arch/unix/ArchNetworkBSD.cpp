@@ -182,6 +182,13 @@ ArchNetworkBSD::listenOnSocket(ArchSocket s)
     }
 }
 
+int ArchNetworkBSD::getPeerProcessId(ArchSocket s)
+{
+    // not needed on these systems: the service that checks its peers is Windows only
+    (void) s;
+    return -1;
+}
+
 ArchSocket
 ArchNetworkBSD::acceptSocket(ArchSocket s, ArchNetAddress* addr)
 {

@@ -24,6 +24,7 @@
 #include "arch/Arch.h"
 #include "base/EventTypes.h"
 
+#include <functional>
 #include <list>
 #include <mutex>
 
@@ -54,6 +55,13 @@ public:
     //! Send a message to all clients matching the filter type.
     virtual void send(const IpcMessage& message, EIpcClientType filterType);
 
+    //! Decide which processes may connect.
+    /*!
+    The filter is called with the id of the connecting process, or -1 if it is unknown, and
+    returns whether the connection is accepted. Without a filter every connection is.
+    */
+    void set_connection_filter(std::function<bool(int)> filter);
+
     //@}
     //! @name accessors
     //@{
@@ -74,6 +82,7 @@ private:
     typedef std::list<IpcClientProxy*> ClientList;
 
     bool m_mock;
+    std::function<bool(int)> connection_filter_;
     IEventQueue* m_events;
     SocketMultiplexer* m_socketMultiplexer;
     std::unique_ptr<TCPListenSocket> socket_;

@@ -53,6 +53,17 @@ public:
     virtual void connect(const NetworkAddress&) = 0;
 
     //@}
+    //! @name accessors
+    //@{
+
+    //! Get the process at the other end of a local connection
+    /*!
+    Returns the id of the process at the other end if it runs on this computer and can be
+    determined, otherwise -1.
+    */
+    virtual int peer_process_id() const { return -1; }
+
+    //@}
 
     // ISocket overrides
     // close() and get_event_target() aren't pure to work around a bug

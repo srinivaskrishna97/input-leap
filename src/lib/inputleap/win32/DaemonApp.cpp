@@ -22,6 +22,8 @@
 #include "inputleap/ArgParser.h"
 #include "inputleap/ServerArgs.h"
 #include "inputleap/ClientArgs.h"
+#include "inputleap/ServiceCommand.h"
+#include "platform/MSWindowsLocalPeer.h"
 #include "ipc/IpcClientProxy.h"
 #include "ipc/IpcMessage.h"
 #include "ipc/IpcLogOutputter.h"
@@ -194,6 +196,11 @@ DaemonApp::mainLoop(bool daemonized)
 
         m_events->add_handler(EventType::IPC_SERVER_MESSAGE_RECEIVED, m_ipcServer,
                               [this](const auto& event) { handle_ipc_message(event); });
+
+        // the daemon runs what it is told with high privileges, so only the user at the console
+        // (or an administrator) may tell it anything or read its log
+        m_ipcServer->set_connection_filter(
+            [](int pid) { return MSWindowsLocalPeer::is_trusted_process(pid); });
         m_ipcServer->listen();
 
         // install the platform event queue to handle service stop events.
@@ -201,6 +208,11 @@ DaemonApp::mainLoop(bool daemonized)
 
         std::string command = ARCH->setting("Command");
         bool elevate = ARCH->setting("Elevate") == "1";
+        std::string reason;
+        if (command != "" && !check_command(command, reason)) {
+            LOG_WARN("not running the last known command: %s", reason.c_str());
+            command.clear();
+        }
         if (command != "") {
             LOG_INFO("using last known command: %s", command.c_str());
             m_watchdog->setCommand(command, elevate);
@@ -235,6 +247,41 @@ DaemonApp::foregroundError(const char* message)
     MessageBox(nullptr, message, "InputLeap Service", MB_OK | MB_ICONERROR);
 }
 
+bool DaemonApp::check_command(const std::string& command, std::string& reason)
+{
+    ServiceCommandPolicy policy;
+    policy.program_dir = MSWindowsLocalPeer::canonical_path(MSWindowsLocalPeer::program_directory());
+    policy.log_dir = MSWindowsLocalPeer::canonical_path(inputleap::DataDirectories::global().u8string());
+    policy.profile_root = MSWindowsLocalPeer::canonical_path(MSWindowsLocalPeer::console_user_local_appdata());
+    policy.case_insensitive_paths = true;
+    policy.canonical = &MSWindowsLocalPeer::canonical_path;
+    policy.user_can_read = &MSWindowsLocalPeer::console_user_can_read;
+    if (policy.program_dir.empty() || policy.log_dir.empty()) {
+        reason = "the program or log folder cannot be determined";
+        return false;
+    }
+    if (policy.profile_root.empty()) {
+        reason = "the user at the console cannot be determined";
+        return false;
+    }
+
+    ServiceCommandCheck check = check_service_command(command, policy);
+    reason = check.reason;
+    return check.ok;
+}
+
+std::string DaemonApp::core_log_filename(const std::string& requested)
+{
+    // the server or client always logs to a file, so that there is something to look at after
+    // a problem; the file is in the log folder, which check_command() made sure of
+    std::string filename = requested;
+    if (filename.empty()) {
+        filename = (inputleap::DataDirectories::global() / "input-leap.log").u8string();
+    }
+    MSWindowsUtil::createDirectory(filename, true);
+    return filename;
+}
+
 std::string
 DaemonApp::logFilename()
 {
@@ -259,6 +306,11 @@ void DaemonApp::handle_ipc_message(const Event& e)
             }
 
             if (!command.empty()) {
+                std::string reason;
+                if (!check_command(command, reason)) {
+                    LOG_WARN("refused a command: %s", reason.c_str());
+                    break;
+                }
                 LOG_DEBUG("new command, elevate=%d command=%s", cm.elevate(), command.c_str());
 
                 std::vector<std::string> argsArray;
@@ -297,17 +349,16 @@ void DaemonApp::handle_ipc_message(const Event& e)
 
                 // eg. no log-to-file while running in foreground
                 if (m_fileLogOutputter != nullptr) {
-                    std::string logFilename;
+                    std::string logFilename = core_log_filename(
+                        argBase->m_logFile != nullptr ? std::string(argBase->m_logFile) : std::string());
+                    ARCH->setting("LogFilename", logFilename);
+                    m_watchdog->setFileLogOutputter(m_fileLogOutputter);
                     if (argBase->m_logFile != nullptr) {
-                        logFilename = std::string(argBase->m_logFile);
-                        ARCH->setting("LogFilename", logFilename);
-                        m_watchdog->setFileLogOutputter(m_fileLogOutputter);
                         command = ArgParser::assembleCommand(argsArray, "--log", 1);
-                        LOG_DEBUG("removed log file argument and filename %s from command ", logFilename.c_str());
-                        LOG_DEBUG("new command, elevate=%d command=%s", cm.elevate(), command.c_str());
-                    } else {
-                        m_watchdog->setFileLogOutputter(nullptr);
+                        LOG_DEBUG("removed log file argument from command, elevate=%d command=%s",
+                                  cm.elevate(), command.c_str());
                     }
+                    LOG_INFO("logging the server or client to %s", logFilename.c_str());
                     m_fileLogOutputter->setLogFilename(logFilename.c_str());
                 }
             }

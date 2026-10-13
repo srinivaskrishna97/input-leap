@@ -313,6 +313,12 @@ TCPSocket::connect(const NetworkAddress& addr)
     setJob(std::move(job));
 }
 
+int TCPSocket::peer_process_id() const
+{
+    std::lock_guard<std::mutex> lock(tcp_mutex_);
+    return m_socket != nullptr ? ARCH->getPeerProcessId(m_socket) : -1;
+}
+
 void
 TCPSocket::init()
 {

@@ -59,6 +59,7 @@ public:
 
     // IDataSocket overrides
     void connect(const NetworkAddress&) override;
+    int peer_process_id() const override;
 
 
     virtual std::unique_ptr<ISocketMultiplexerJob> newJob();

@@ -162,6 +162,13 @@ public:
     */
     virtual ArchSocket acceptSocket(ArchSocket s, ArchNetAddress* addr) = 0;
 
+    //! Get the process at the other end of a local connection
+    /*!
+    Returns the id of the process connected to socket \c s if that process runs on this
+    computer, or -1 if it cannot be determined, e.g. because it runs elsewhere.
+    */
+    virtual int getPeerProcessId(ArchSocket s) = 0;
+
     //! Connect socket
     /*!
     Connects the socket \c s to the remote address \c addr.  Returns

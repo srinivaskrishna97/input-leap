@@ -77,6 +77,11 @@ IpcServer::~IpcServer()
     }
 }
 
+void IpcServer::set_connection_filter(std::function<bool(int)> filter)
+{
+    connection_filter_ = std::move(filter);
+}
+
 void
 IpcServer::listen()
 {
@@ -88,6 +93,15 @@ void IpcServer::handle_client_connecting()
     auto stream = socket_->accept();
     if (!stream) {
         return;
+    }
+
+    if (connection_filter_) {
+        int pid = stream->peer_process_id();
+        if (!connection_filter_(pid)) {
+            LOG_WARN("refused ipc connection from process %d", pid);
+            stream->close();
+            return;
+        }
     }
 
     LOG_DEBUG("accepted ipc client connection");

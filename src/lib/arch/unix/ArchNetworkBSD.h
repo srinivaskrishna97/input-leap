@@ -70,6 +70,7 @@ public:
     void bindSocket(ArchSocket s, ArchNetAddress addr) override;
     void listenOnSocket(ArchSocket s) override;
     ArchSocket acceptSocket(ArchSocket s, ArchNetAddress* addr) override;
+    int getPeerProcessId(ArchSocket s) override;
     bool connectSocket(ArchSocket s, ArchNetAddress name) override;
     int pollSocket(PollEntry[], int num, double timeout) override;
     void unblockPollSocket(ArchThread thread) override;

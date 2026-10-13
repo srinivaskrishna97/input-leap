@@ -77,6 +77,7 @@ public:
     virtual void bindSocket(ArchSocket s, ArchNetAddress addr);
     virtual void listenOnSocket(ArchSocket s);
     virtual ArchSocket acceptSocket(ArchSocket s, ArchNetAddress* addr);
+    virtual int getPeerProcessId(ArchSocket s);
     virtual bool connectSocket(ArchSocket s, ArchNetAddress name);
     virtual int pollSocket(PollEntry[], int num, double timeout);
     virtual void unblockPollSocket(ArchThread thread);

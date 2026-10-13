@@ -42,6 +42,10 @@ private:
     void foregroundError(const char* message);
     std::string logFilename();
     void handle_ipc_message(const Event& event);
+    // whether the command may be run, with the reason if not
+    bool check_command(const std::string& command, std::string& reason);
+    // the log file for the server or client; the default if the given one is not acceptable
+    std::string core_log_filename(const std::string& requested);
 
 public:
     static DaemonApp* s_instance;

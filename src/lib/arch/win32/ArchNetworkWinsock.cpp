@@ -21,6 +21,10 @@
 #include "arch/win32/XArchWindows.h"
 #include "arch/IArchMultithread.h"
 #include "arch/Arch.h"
+
+#include <iphlpapi.h>
+
+#include <vector>
 #include "arch/XArch.h"
 
 #include <malloc.h>
@@ -44,6 +48,8 @@ static int (PASCAL FAR *connect_winsock)(SOCKET s, const struct sockaddr FAR *na
 static int (PASCAL FAR *gethostname_winsock)(char FAR * name, int namelen);
 static int (PASCAL FAR *getsockerror_winsock)(void);
 static int (PASCAL FAR *getsockopt_winsock)(SOCKET s, int level, int optname, void FAR * optval, int FAR *optlen);
+static int (PASCAL FAR *getsockname_winsock)(SOCKET s, struct sockaddr FAR *name, int FAR *namelen);
+static int (PASCAL FAR *getpeername_winsock)(SOCKET s, struct sockaddr FAR *name, int FAR *namelen);
 static u_short (PASCAL FAR *htons_winsock)(u_short v);
 static char FAR * (PASCAL FAR *inet_ntoa_winsock)(struct in_addr in);
 static unsigned long (PASCAL FAR *inet_addr_winsock)(const char FAR * cp);
@@ -165,6 +171,8 @@ ArchNetworkWinsock::initModule(HMODULE module)
 
     // get function addresses
     setfunc(accept_winsock, accept, SOCKET (PASCAL FAR *)(SOCKET s, struct sockaddr FAR *addr, int FAR *addrlen));
+    setfunc(getsockname_winsock, getsockname, int (PASCAL FAR *)(SOCKET s, struct sockaddr FAR *name, int FAR *namelen));
+    setfunc(getpeername_winsock, getpeername, int (PASCAL FAR *)(SOCKET s, struct sockaddr FAR *name, int FAR *namelen));
     setfunc(bind_winsock, bind, int (PASCAL FAR *)(SOCKET s, const struct sockaddr FAR *addr, int namelen));
     setfunc(close_winsock, closesocket, int (PASCAL FAR *)(SOCKET s));
     setfunc(connect_winsock, connect, int (PASCAL FAR *)(SOCKET s, const struct sockaddr FAR *name, int namelen));
@@ -310,6 +318,51 @@ ArchNetworkWinsock::listenOnSocket(ArchSocket s)
     if (listen_winsock(s->m_socket, 3) == SOCKET_ERROR) {
         throwError(getsockerror_winsock());
     }
+}
+
+int ArchNetworkWinsock::getPeerProcessId(ArchSocket s)
+{
+    assert(s != nullptr);
+
+    // only connections over IPv4 loopback come from this computer
+    struct sockaddr_in local;
+    struct sockaddr_in peer;
+    int length = sizeof(local);
+    if (getsockname_winsock(s->m_socket, reinterpret_cast<struct sockaddr*>(&local), &length) == SOCKET_ERROR ||
+        local.sin_family != AF_INET) {
+        return -1;
+    }
+    length = sizeof(peer);
+    if (getpeername_winsock(s->m_socket, reinterpret_cast<struct sockaddr*>(&peer), &length) == SOCKET_ERROR ||
+        peer.sin_family != AF_INET) {
+        return -1;
+    }
+    const unsigned char* address = reinterpret_cast<const unsigned char*>(&peer.sin_addr);
+    if (address[0] != 127) {
+        return -1;
+    }
+
+    // the connection table lists the peer's end of the connection with the process that owns it
+    ULONG size = 0;
+    GetExtendedTcpTable(nullptr, &size, FALSE, AF_INET, TCP_TABLE_OWNER_PID_CONNECTIONS, 0);
+    if (size == 0) {
+        return -1;
+    }
+    std::vector<unsigned char> buffer(size);
+    if (GetExtendedTcpTable(buffer.data(), &size, FALSE, AF_INET, TCP_TABLE_OWNER_PID_CONNECTIONS, 0) != NO_ERROR) {
+        return -1;
+    }
+    const MIB_TCPTABLE_OWNER_PID* table = reinterpret_cast<const MIB_TCPTABLE_OWNER_PID*>(buffer.data());
+    for (DWORD i = 0; i < table->dwNumEntries; ++i) {
+        const MIB_TCPROW_OWNER_PID& row = table->table[i];
+        // the ports in the table are in network byte order, like those in the addresses
+        if (static_cast<u_short>(row.dwLocalPort) == peer.sin_port &&
+            static_cast<u_short>(row.dwRemotePort) == local.sin_port &&
+            row.dwLocalAddr == peer.sin_addr.s_addr && row.dwRemoteAddr == local.sin_addr.s_addr) {
+            return static_cast<int>(row.dwOwningPid);
+        }
+    }
+    return -1;
 }
 
 ArchSocket
