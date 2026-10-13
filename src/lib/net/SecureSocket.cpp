@@ -282,7 +282,10 @@ SecureSocket::secureRead(void* buffer, int size, int& read)
 bool SecureSocket::has_buffered_input()
 {
     std::lock_guard<std::mutex> ssl_lock{ssl_mutex_};
-    return m_ssl->m_ssl != nullptr && SSL_has_pending(m_ssl->m_ssl) != 0;
+    // Read-ahead is off, so OpenSSL reads one record at a time: once the decrypted data of the
+    // current record has been read, the next read reaches the socket. (LibreSSL, which some
+    // distributions use, has no SSL_has_pending().)
+    return m_ssl->m_ssl != nullptr && SSL_pending(m_ssl->m_ssl) > 0;
 }
 
 int
