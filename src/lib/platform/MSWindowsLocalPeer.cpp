@@ -26,6 +26,7 @@
 #include <Userenv.h>
 #include <Wtsapi32.h>
 
+#include <cwchar>
 #include <vector>
 
 namespace inputleap {
