@@ -43,6 +43,9 @@
 #include <string>
 #include <thread>
 
+// the logging macros refer to inputleap::Log unqualified
+using namespace inputleap;
+
 namespace {
 
 const wchar_t* const kHelperWindowClass = L"InputLeapClipboardHelper";
@@ -82,8 +85,6 @@ void schedule_capture(UINT delay_ms)
 
 void capture_and_send()
 {
-    using namespace inputleap;
-
     // contents put on the clipboard by InputLeap came from another screen
     if (MSWindowsClipboard::is_owned_by_us()) {
         return;
@@ -179,8 +180,6 @@ void watch_core(DWORD pid)
 
 int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int)
 {
-    using namespace inputleap;
-
     ArchMiscWindows::setInstanceWin32(instance);
     Arch arch;
     arch.init();
