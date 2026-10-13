@@ -165,7 +165,8 @@ IpcServer::send(const IpcMessage& message, EIpcClientType filterType)
     ClientList::iterator it;
     for (it = m_clients.begin(); it != m_clients.end(); it++) {
         IpcClientProxy* proxy = *it;
-        if (proxy->m_clientType == filterType) {
+        // a disconnecting client's stream is being closed by the main thread
+        if (!proxy->m_disconnecting && proxy->m_clientType == filterType) {
             proxy->send(message);
         }
     }

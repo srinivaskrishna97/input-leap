@@ -78,21 +78,32 @@ void IpcClientProxy::handle_data()
 
     std::uint8_t code[4];
     std::uint32_t n = stream_->read(code, 4);
-    while (n != 0) {
+    while (n != 0 && !m_disconnecting) {
 
         LOG_DEBUG("ipc read: %c%c%c%c",
             code[0], code[1], code[2], code[3]);
 
         EventDataBase* event_data = nullptr;
-        if (memcmp(code, kIpcMsgHello, 4) == 0) {
-            event_data = create_event_data<IpcHelloMessage>(parseHello());
+        try {
+            if (n == 4 && memcmp(code, kIpcMsgHello, 4) == 0) {
+                event_data = create_event_data<IpcHelloMessage>(parseHello());
+            }
+            else if (n == 4 && memcmp(code, kIpcMsgCommand, 4) == 0) {
+                event_data = create_event_data<IpcCommandMessage>(parseCommand());
+            }
+            else {
+                LOG_ERR("invalid ipc message");
+            }
         }
-        else if (memcmp(code, kIpcMsgCommand, 4) == 0) {
-            event_data = create_event_data<IpcCommandMessage>(parseCommand());
+        catch (const std::exception& e) {
+            // a truncated or malformed message
+            LOG_ERR("invalid ipc message: %s", e.what());
         }
-        else {
-            LOG_ERR("invalid ipc message");
+
+        if (event_data == nullptr) {
+            // the rest of the stream can't be parsed either
             disconnect();
+            break;
         }
 
         m_events->add_event(EventType::IPC_CLIENT_PROXY_MESSAGE_RECEIVED, this, event_data);
@@ -155,8 +166,12 @@ IpcCommandMessage IpcClientProxy::parseCommand()
 void
 IpcClientProxy::disconnect()
 {
+    // A client that goes away usually makes the stream report several errors. Only the first
+    // one disconnects, so that the server deletes this proxy exactly once.
+    if (m_disconnecting.exchange(true)) {
+        return;
+    }
     LOG_DEBUG("ipc disconnect, closing stream");
-    m_disconnecting = true;
     stream_->close();
     m_events->add_event(EventType::IPC_CLIENT_PROXY_DISCONNECTED, this);
 }
