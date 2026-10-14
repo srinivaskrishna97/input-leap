@@ -44,6 +44,9 @@ std::uint32_t get_be32(const unsigned char* p)
 
 } // namespace
 
+// needed by C++14 builds, where a constexpr member is not implicitly defined
+constexpr std::size_t MonitorLayout::kMaxMonitors;
+
 void MonitorLayout::add(const MonitorRect& monitor)
 {
     if (monitor.w <= 0 || monitor.h <= 0 || monitors_.size() >= kMaxMonitors) {
