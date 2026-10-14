@@ -72,6 +72,19 @@ ServerProxy::ServerProxy(Client* client, inputleap::IStream* stream, IEventQueue
                                          chunk.id_, chunk.sequence_, chunk.mark_, &chunk.data_);
                 });
 
+    // pieces of shared files go to the screen as they arrive
+    m_clipboardReceiver.set_file_sink(
+        [this](const ClipboardTransferHeader& header, std::uint64_t offset,
+               const std::string& chunk) {
+            ClipboardFileChunkInfo info;
+            info.hash = header.hash;
+            info.index = header.file_index;
+            info.offset = offset;
+            info.data = chunk;
+            m_client->clipboardFileChunk(info);
+            return true;
+        });
+
     // send heartbeat
     setKeepAliveRate(kKeepAliveRate);
 }
@@ -318,6 +331,11 @@ ServerProxy::EResult ServerProxy::parseMessage(const std::uint8_t* code)
         clipboardDataRequest();
     }
 
+    else if (memcmp(code, kMsgQClipboardFile, 4) == 0 &&
+             (m_clipboardCaps & kClipboardCapFileStreaming) != 0) {
+        clipboardFileRequest();
+    }
+
     else if (memcmp(code, kMsgDClipboardData, 4) == 0 &&
              (m_clipboardCaps & kClipboardCapOffers) != 0) {
         clipboardData();
@@ -416,6 +434,65 @@ void ServerProxy::onClipboardAge(ClipboardID id, std::uint32_t age_ms)
     ProtocolUtil::writef(m_stream, kMsgDClipboardAge, id, age_ms);
 }
 
+void ServerProxy::clipboardFileRequest()
+{
+    ClipboardID id;
+    std::uint32_t hashHigh, hashLow, index, offsetHigh, offsetLow;
+    if (!ProtocolUtil::readf(m_stream, kMsgQClipboardFile + 4, &id, &hashHigh, &hashLow, &index,
+                             &offsetHigh, &offsetLow)) {
+        return;
+    }
+    if (id >= kClipboardEnd) {
+        return;
+    }
+    ClipboardFileRequestInfo request;
+    request.id = id;
+    request.hash = (static_cast<std::uint64_t>(hashHigh) << 32) | hashLow;
+    request.index = index;
+    request.offset = (static_cast<std::uint64_t>(offsetHigh) << 32) | offsetLow;
+    LOG_DEBUG("recv request for shared file %u from offset %llu", index,
+              static_cast<unsigned long long>(request.offset));
+    m_client->clipboardFileRequested(id, request);
+}
+
+void ServerProxy::requestClipboardFile(const ClipboardFileRequestInfo& request)
+{
+    if ((m_clipboardCaps & kClipboardCapFileStreaming) == 0) {
+        ClipboardFileChunkInfo chunk;
+        chunk.hash = request.hash;
+        chunk.index = request.index;
+        chunk.unavailable = true;
+        m_client->clipboardFileChunk(chunk);
+        return;
+    }
+    LOG_DEBUG("requesting shared file %u from offset %llu", request.index,
+              static_cast<unsigned long long>(request.offset));
+    ProtocolUtil::writef(m_stream, kMsgQClipboardFile, request.id,
+                         static_cast<std::uint32_t>(request.hash >> 32),
+                         static_cast<std::uint32_t>(request.hash), request.index,
+                         static_cast<std::uint32_t>(request.offset >> 32),
+                         static_cast<std::uint32_t>(request.offset));
+}
+
+void ServerProxy::provideClipboardFile(ClipboardID id, const ClipboardFileRequestInfo& request,
+                                       const fs::path& path, std::uint64_t size)
+{
+    std::uint64_t remaining = size - request.offset;
+    auto header = make_clipboard_file_header(request.hash, request.index, request.offset,
+                                             remaining);
+    LOG_DEBUG("sending shared file %u, %llu bytes", request.index,
+              static_cast<unsigned long long>(remaining));
+    m_clipboardStreamer->send_file(id, 0, header.format(), path, request.offset, remaining);
+}
+
+void ServerProxy::provideClipboardFileUnavailable(ClipboardID id, std::uint64_t hash,
+                                                  std::uint32_t index)
+{
+    auto header = make_unavailable_clipboard_file_header(hash, index);
+    m_clipboardStreamer->send_encoded(id, 0, header.format(),
+                                      std::make_shared<const std::string>());
+}
+
 void ServerProxy::requestClipboardData(ClipboardID id, const ClipboardOffer& offer)
 {
     LOG_DEBUG("requesting clipboard %d size=%u", id, offer.size);
@@ -500,6 +577,21 @@ void ServerProxy::clipboardData()
     }
 
     auto status = m_clipboardReceiver.add(mark, data);
+
+    if (m_clipboardReceiver.header().kind == ClipboardTransferHeader::Kind::File) {
+        // the pieces went to the screen through the sink; tell it how the file ended
+        if (status == ClipboardTransferReceiver::Status::InProgress) {
+            return;
+        }
+        ClipboardFileChunkInfo info;
+        info.hash = m_clipboardReceiver.header().hash;
+        info.index = m_clipboardReceiver.header().file_index;
+        info.offset = m_clipboardReceiver.header().file_offset + m_clipboardReceiver.received();
+        info.complete = status == ClipboardTransferReceiver::Status::Complete;
+        info.unavailable = !info.complete;
+        m_client->clipboardFileChunk(info);
+        return;
+    }
 
     ClipboardTransferProgress progress;
     progress.received = m_clipboardReceiver.received();

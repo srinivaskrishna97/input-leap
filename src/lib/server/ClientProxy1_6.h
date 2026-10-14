@@ -77,6 +77,12 @@ public:
     MarshalledClipboardPtr getClipboardData(ClipboardID id) const override;
     void setClipboardData(ClipboardID id, const MarshalledClipboardPtr& data) override;
     bool supportsClipboardOffers() const override;
+    bool supportsClipboardFiles() const override;
+    void requestClipboardFile(const ClipboardFileRequestInfo& request) override;
+    void provideClipboardFile(ClipboardID id, const ClipboardFileRequestInfo& request,
+                              const fs::path& path, std::uint64_t size) override;
+    void provideClipboardFileUnavailable(ClipboardID id, std::uint64_t hash,
+                                         std::uint32_t index) override;
     void setClipboardOffer(ClipboardID id, const ClipboardOffer& offer) override;
     void requestClipboardData(ClipboardID id, const ClipboardOffer& offer) override;
     void provideClipboardData(ClipboardID id, const MarshalledClipboardPtr& data) override;
@@ -114,6 +120,7 @@ private:
     bool recvClipboardData();
     bool recvClipboardAge();
     bool recvMonitors();
+    bool recvClipboardFileRequest();
 
     void sendClipboardOffer(ClipboardID id, const ClipboardOffer& offer, std::uint32_t flags);
     void sendClipboardTransfer(ClipboardID id, const ClipboardTransferPayload& payload);

@@ -25,6 +25,7 @@
 #include "inputleap/Clipboard.h"
 #include "inputleap/ClipboardData.h"
 #include "inputleap/MonitorLayout.h"
+#include "io/filesystem.h"
 #include "inputleap/DragInformation.h"
 #include "inputleap/INode.h"
 #include "inputleap/ClientArgs.h"
@@ -169,6 +170,12 @@ public:
     */
     void clipboardTransferProgress(std::uint64_t hash, const ClipboardTransferProgress& progress);
 
+    //! The server requests the contents of a shared file that this screen lists
+    void clipboardFileRequested(ClipboardID, const ClipboardFileRequestInfo& request);
+
+    //! A piece of a shared file arrived from the server
+    void clipboardFileChunk(const ClipboardFileChunkInfo& chunk);
+
     void grabClipboard(ClipboardID) override;
     void setClipboardDirty(ClipboardID, bool) override;
     void keyDown(KeyID, KeyModifierMask, KeyButton) override;
@@ -188,6 +195,7 @@ private:
     void sendClipboard(ClipboardID);
     void sendClipboardContents(ClipboardID, const MarshalledClipboardPtr& data);
     bool serverComparesClipboardAges() const;
+    bool serverTakesFiles() const;
     void announceClipboard(ClipboardID);
     void send_event(EventType);
     void sendConnectionFailedEvent(const char* msg);
@@ -212,6 +220,7 @@ private:
     void handle_clipboard_grabbed(const Event& event);
     void handle_clipboard_changed(const Event& event);
     void handle_clipboard_data_requested(const Event& event);
+    void handle_clipboard_file_requested(const Event& event);
     void handle_hello();
     void handle_suspend();
     void handle_resume();

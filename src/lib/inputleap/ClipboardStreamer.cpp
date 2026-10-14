@@ -71,8 +71,45 @@ void ClipboardStreamer::send(ClipboardID id, std::uint32_t sequence, MarshalledC
     transfer.id = id;
     transfer.sequence = sequence;
     transfer.start_payload = std::to_string(data->size());
+    transfer.size = data->size();
     transfer.marshalled = std::move(data);
     enqueue(std::move(transfer));
+}
+
+void ClipboardStreamer::send_file(ClipboardID id, std::uint32_t sequence,
+                                  std::string start_payload, const fs::path& file,
+                                  std::uint64_t offset, std::uint64_t size)
+{
+    Transfer transfer;
+    transfer.id = id;
+    transfer.sequence = sequence;
+    transfer.start_payload = std::move(start_payload);
+    transfer.file = file;
+    transfer.file_offset = offset;
+    transfer.size = size;
+    enqueue(std::move(transfer));
+}
+
+bool ClipboardStreamer::Transfer::read_chunk(std::size_t max, std::string& out)
+{
+    if (!file_stream) {
+        file_stream = std::make_shared<std::ifstream>();
+        open_utf8_path(*file_stream, file, std::ios::in | std::ios::binary);
+        if (!*file_stream ||
+            !file_stream->seekg(static_cast<std::streamoff>(file_offset), std::ios::beg)) {
+            LOG_WARN("cannot read \"%s\" to send it", file.u8string().c_str());
+            failed = true;
+            return false;
+        }
+    }
+    std::size_t wanted = static_cast<std::size_t>((std::min)(static_cast<std::uint64_t>(max), size - offset));
+    out.resize(wanted);
+    if (wanted > 0 && !file_stream->read(&out[0], static_cast<std::streamsize>(wanted))) {
+        LOG_WARN("cannot read \"%s\" to send it", file.u8string().c_str());
+        failed = true;
+        return false;
+    }
+    return true;
 }
 
 void ClipboardStreamer::send_encoded(ClipboardID id, std::uint32_t sequence,
@@ -86,6 +123,7 @@ void ClipboardStreamer::send_encoded(ClipboardID id, std::uint32_t sequence,
     transfer.id = id;
     transfer.sequence = sequence;
     transfer.start_payload = std::move(start_payload);
+    transfer.size = payload->size();
     transfer.encoded = std::move(payload);
     enqueue(std::move(transfer));
 }
@@ -112,7 +150,7 @@ std::size_t ClipboardStreamer::pending_bytes() const
 {
     std::size_t result = 0;
     for (const auto& transfer : transfers_) {
-        result += transfer.bytes().size() - transfer.offset;
+        result += static_cast<std::size_t>(transfer.size - transfer.offset);
     }
     return result;
 }
@@ -136,7 +174,8 @@ void ClipboardStreamer::enqueue(Transfer transfer)
                                     [&](const Transfer& t) { return t.id == transfer.id; }),
                      transfers_.end());
 
-    LOG_DEBUG("queued clipboard %d for sending, size=%zu", transfer.id, transfer.bytes().size());
+    LOG_DEBUG("queued clipboard %d for sending, size=%llu", transfer.id,
+              static_cast<unsigned long long>(transfer.size));
     transfers_.push_back(std::move(transfer));
 
     if (was_idle) {
@@ -152,8 +191,7 @@ void ClipboardStreamer::pump()
     std::size_t budget = window_size_;
     while (!transfers_.empty()) {
         Transfer& transfer = transfers_.front();
-        const std::string& bytes = transfer.bytes();
-        const bool encoded = transfer.encoded != nullptr;
+        const bool encoded = transfer.encoded != nullptr || transfer.from_file();
 
         if (!transfer.started) {
             ClipboardChunk chunk;
@@ -165,26 +203,36 @@ void ClipboardStreamer::pump()
             transfer.started = true;
         }
 
-        if (transfer.offset < bytes.size()) {
+        if (transfer.offset < transfer.size && !transfer.failed) {
             if (budget == 0) {
                 break;
             }
-            std::size_t size = (std::min)(kClipboardChunkSize, bytes.size() - transfer.offset);
-
             ClipboardChunk chunk;
             chunk.id_ = transfer.id;
             chunk.sequence_ = transfer.sequence;
             chunk.mark_ = kDataChunk;
-            chunk.data_.assign(bytes, transfer.offset, size);
+            if (transfer.from_file()) {
+                if (!transfer.read_chunk(kClipboardChunkSize, chunk.data_)) {
+                    // the end chunk below ends the transfer short, which the receiver rejects
+                    continue;
+                }
+            }
+            else {
+                const std::string& bytes = transfer.bytes();
+                std::size_t size = (std::min)(kClipboardChunkSize,
+                                              bytes.size() - static_cast<std::size_t>(transfer.offset));
+                chunk.data_.assign(bytes, static_cast<std::size_t>(transfer.offset), size);
+            }
             writer_(chunk, encoded);
 
-            transfer.offset += size;
-            budget -= (std::min)(budget, size);
+            transfer.offset += chunk.data_.size();
+            budget -= (std::min)(budget, chunk.data_.size());
             continue;
         }
 
         writer_(ClipboardChunk::end(transfer.id, transfer.sequence), encoded);
-        LOG_DEBUG("sent clipboard %d, size=%zu", transfer.id, bytes.size());
+        LOG_DEBUG("sent clipboard %d, size=%llu", transfer.id,
+                  static_cast<unsigned long long>(transfer.offset));
         transfers_.pop_front();
     }
 

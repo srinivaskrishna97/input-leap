@@ -19,6 +19,7 @@
 #include "inputleap/ClipboardData.h"
 
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <string>
 
@@ -39,16 +40,38 @@ enum class ClipboardEncoding : std::uint32_t {
 The header is the text "1 <encoding> <encoded size> <size> <hash>", where 1 is the version of
 the header, the sizes are decimal numbers of bytes and the hash is MarshalledClipboard::hash()
 of the marshalled contents as 16 hexadecimal digits.
+
+A transfer can also carry a piece of the contents of a shared file (see kMsgQClipboardFile):
+its header is "2 <encoding> <encoded size> <size> <hash> <index> <offset>", where the hash
+is that of the contents listing the files, index is the file's index in the list, offset is
+where the piece starts within the file, and size is the length of the piece. Such pieces are
+never compressed.
 */
 struct ClipboardTransferHeader {
+    enum class Kind {
+        Contents,   // clipboard contents
+        File,       // a piece of a shared file
+    };
+
+    Kind kind = Kind::Contents;
     ClipboardEncoding encoding = ClipboardEncoding::None;
     std::uint64_t encoded_size = 0;
     std::uint64_t size = 0;
     std::uint64_t hash = 0;
+    std::uint32_t file_index = 0;
+    std::uint64_t file_offset = 0;
 
     std::string format() const;
     static bool parse(const std::string& text, ClipboardTransferHeader& header);
 };
+
+/// The header of a transfer that carries \p size bytes of a shared file from \p offset on.
+ClipboardTransferHeader make_clipboard_file_header(std::uint64_t hash, std::uint32_t index,
+                                                   std::uint64_t offset, std::uint64_t size);
+
+/// The header of a transfer that tells the receiver that a shared file is not available.
+ClipboardTransferHeader make_unavailable_clipboard_file_header(std::uint64_t hash,
+                                                               std::uint32_t index);
 
 /// Clipboard contents prepared for a kMsgDClipboardData transfer.
 struct ClipboardTransferPayload {
@@ -89,6 +112,13 @@ public:
     /// Transfers of contents larger than \p max_size are rejected.
     void set_max_size(std::size_t max_size);
 
+    /*! Receives the pieces of shared files, see ClipboardTransferHeader::Kind::File. Called
+        with each chunk of such a transfer and the offset of the chunk within the file; the
+        transfer fails if it returns false. Without a sink such transfers fail. */
+    using FileSink = std::function<bool(const ClipboardTransferHeader& header,
+                                        std::uint64_t offset, const std::string& chunk)>;
+    void set_file_sink(FileSink sink) { file_sink_ = std::move(sink); }
+
     /// Adds a chunk with the given mark (kDataStart, kDataChunk or kDataEnd).
     Status add(std::uint8_t mark, const std::string& data);
 
@@ -98,7 +128,7 @@ public:
     /// The header of the current or last transfer.
     const ClipboardTransferHeader& header() const { return header_; }
     /// The bytes received so far of the current transfer, and the bytes it will have in total.
-    std::uint64_t received() const { return buffer_.size(); }
+    std::uint64_t received() const { return header_.kind == ClipboardTransferHeader::Kind::File ? file_received_ : buffer_.size(); }
     std::uint64_t expected() const { return header_.encoded_size; }
 
 private:
@@ -107,6 +137,8 @@ private:
     ClipboardTransferHeader header_;
     std::string buffer_;
     MarshalledClipboardPtr result_;
+    FileSink file_sink_;
+    std::uint64_t file_received_ = 0;
 };
 
 } // namespace inputleap

@@ -18,6 +18,7 @@
 
 #include "base/EventTarget.h"
 #include "inputleap/ClipboardData.h"
+#include "inputleap/ClipboardFiles.h"
 #include "inputleap/clipboard_types.h"
 #include "io/filesystem.h"
 
@@ -27,8 +28,13 @@
 #include <chrono>
 #include <condition_variable>
 #include <deque>
+#include <fstream>
+#include <functional>
+#include <map>
+#include <memory>
 #include <mutex>
 #include <thread>
+#include <utility>
 #include <vector>
 
 namespace inputleap {
@@ -55,6 +61,12 @@ contents that applications hand over on request, such as file lists and the text
 of many applications. The worker then starts a helper program as the user, which captures the
 clipboard and sends the contents to the worker, see ClipboardHelperMessages.h. The worker
 captures by itself only if the helper does not answer.
+
+Files are listed on the clipboard without their contents (see ClipboardFileList). The worker
+remembers where the files that it captured are, so that they can be sent when another screen
+pastes them (get_file()), and when offered files are pasted here, it fetches them one by one
+from the other screen (CLIPBOARD_FILE_REQUESTED events answered with file_chunk()) before the
+paste completes.
 */
 class MSWindowsClipboardWorker {
 public:
@@ -119,6 +131,17 @@ public:
     */
     void offers_unavailable();
 
+    /*! Returns the file with the given index in the list of the contents with the given hash,
+        if those contents were captured here or their files were fetched here. */
+    bool get_file(std::uint64_t hash, std::uint32_t index, fs::path& path,
+                  std::uint64_t& size) const;
+
+    /// A piece of a shared file, see IPlatformScreen::clipboardFileChunk().
+    void file_chunk(const ClipboardFileChunkInfo& chunk);
+
+    /// Called, on the thread that calls file_chunk(), with the progress of a fetch of files.
+    void set_progress_callback(std::function<void(const ClipboardTransferProgress&)> callback);
+
 private:
     struct Command {
         enum class Kind { Apply, Clear, Offer };
@@ -134,6 +157,32 @@ private:
         MarshalledClipboardPtr data;
         bool requested = false;
         bool unavailable = false;
+        // the files that the contents list are being fetched, or are all here
+        bool fetching_files = false;
+        bool files_ready = false;
+    };
+
+    // the files of the offered contents, being fetched for a paste
+    struct FileFetch {
+        bool active = false;
+        std::uint64_t hash = 0;
+        std::string listing;
+        ClipboardFileList list;
+        fs::path directory;
+        std::vector<fs::path> paths;    // per entry of the list; empty for directories
+        std::size_t next = 0;           // the next entry to request
+        std::size_t current = 0;        // the entry being received
+        std::uint64_t received = 0;     // of the current file
+        std::uint64_t total_received = 0;
+        std::unique_ptr<std::ofstream> stream;
+    };
+
+    // a file of another screen kept here to be passed on, see keep_file_chunk()
+    struct KeptFile {
+        fs::path path;
+        std::unique_ptr<std::ofstream> stream;
+        std::uint64_t received = 0;
+        bool complete = false;
     };
 
     bool create_window();
@@ -152,7 +201,16 @@ private:
     bool request_helper_capture();
     void on_helper_hello(const COPYDATASTRUCT* data);
     void on_helper_capture(const COPYDATASTRUCT* data);
+    void on_helper_paths(const COPYDATASTRUCT* data);
     void capture_locally();
+    void remember_file_paths(std::uint64_t hash, std::vector<fs::path> paths);
+    static std::string files_of(const MarshalledClipboardPtr& data);
+    bool start_file_fetch(std::uint64_t hash, const std::string& listing,
+                          ClipboardFileRequestInfo& request);
+    bool request_next_file(ClipboardFileRequestInfo& request);
+    void finish_file_fetch(bool ok);
+    void keep_file_chunk(const ClipboardFileChunkInfo& chunk);
+    fs::path kept_file_path(std::uint64_t hash, std::uint32_t index) const;
     void process_commands();
     bool apply_now(const MarshalledClipboardPtr& data);
     bool clear_now();
@@ -162,7 +220,7 @@ private:
 
     void render_format(UINT win32_format);
     void render_all_formats();
-    MarshalledClipboardPtr wait_for_offer_data();
+    MarshalledClipboardPtr wait_for_offer_data(bool want_files);
     void reset_offer();
 
     IEventQueue* events_;
@@ -209,6 +267,17 @@ private:
     int helper_starts_ = 0;
     // whether the helper was asked for a capture that has not arrived yet
     bool helper_capture_expected_ = false;
+    // the paths of the files listed by a capture, which the helper sends ahead of the capture,
+    // by clipboard sequence number
+    std::map<DWORD, std::vector<fs::path>> helper_paths_;
+
+    // shared between the threads, guarded by mutex_
+    FileFetch fetch_;
+    // the files listed by contents, by the hash of the contents: captured here or fetched here
+    std::map<std::uint64_t, std::vector<fs::path>> file_paths_;
+    std::deque<std::uint64_t> file_paths_order_;
+    std::map<std::pair<std::uint64_t, std::uint32_t>, KeptFile> kept_files_;
+    std::function<void(const ClipboardTransferProgress&)> progress_callback_;
 };
 
 } // namespace inputleap

@@ -507,6 +507,17 @@ void Screen::getShape(std::int32_t& x, std::int32_t& y, std::int32_t& w, std::in
     m_screen->getShape(x, y, w, h);
 }
 
+bool Screen::getClipboardFile(std::uint64_t hash, std::uint32_t index, fs::path& path,
+                              std::uint64_t& size) const
+{
+    return m_screen->getClipboardFile(hash, index, path, size);
+}
+
+void Screen::clipboardFileChunk(const ClipboardFileChunkInfo& chunk)
+{
+    m_screen->clipboardFileChunk(chunk);
+}
+
 MonitorLayout Screen::getMonitors() const
 {
     return m_screen->getMonitors();

@@ -68,6 +68,7 @@ public:
     virtual void send_clipboard_offer(ClipboardID id, std::uint32_t flags,
                                       const ClipboardOffer& offer) = 0;
     virtual void send_clipboard_data_request(ClipboardID id, std::uint64_t hash) = 0;
+    virtual void send_clipboard_file_request(const ClipboardFileRequestInfo& request) = 0;
 
     virtual void flush() = 0;
     virtual void close() = 0;

@@ -61,6 +61,44 @@ bool decode_clipboard_capture(const void* bytes, std::size_t size, std::uint32_t
     return true;
 }
 
+std::string encode_clipboard_file_paths(std::uint32_t sequence,
+                                        const std::vector<std::string>& paths)
+{
+    std::string out;
+    put_le(out, sequence, 4);
+    for (const std::string& path : paths) {
+        put_le(out, path.size(), 4);
+        out.append(path);
+    }
+    return out;
+}
+
+bool decode_clipboard_file_paths(const void* bytes, std::size_t size, std::uint32_t& sequence,
+                                 std::vector<std::string>& paths)
+{
+    if (bytes == nullptr || size < 4) {
+        return false;
+    }
+    const auto* p = static_cast<const unsigned char*>(bytes);
+    std::vector<std::string> result;
+    std::size_t pos = 4;
+    while (pos < size) {
+        if (size - pos < 4) {
+            return false;
+        }
+        std::size_t length = static_cast<std::size_t>(get_le(p + pos, 4));
+        pos += 4;
+        if (length > size - pos) {
+            return false;
+        }
+        result.emplace_back(reinterpret_cast<const char*>(p + pos), length);
+        pos += length;
+    }
+    sequence = static_cast<std::uint32_t>(get_le(p, 4));
+    paths = std::move(result);
+    return true;
+}
+
 std::string encode_clipboard_helper_hello(std::uint64_t window, std::uint32_t pid)
 {
     std::string out;

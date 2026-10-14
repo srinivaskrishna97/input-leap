@@ -168,6 +168,11 @@ MSWindowsScreen::MSWindowsScreen(
                           [this](const auto& e){ handle_clipboard_captured(); });
     m_events->add_handler(EventType::CLIPBOARD_DATA_REQUESTED, m_clipboardWorker->event_target(),
                           [this](const auto& e){ handle_clipboard_data_needed(e); });
+    m_events->add_handler(EventType::CLIPBOARD_FILE_REQUESTED, m_clipboardWorker->event_target(),
+                          [this](const auto& e){ handle_clipboard_file_needed(e); });
+    m_clipboardWorker->set_progress_callback([this](const ClipboardTransferProgress& progress) {
+        setClipboardTransferProgress(progress);
+    });
 
     // install the platform event queue
     m_events->set_buffer(std::make_unique<MSWindowsEventQueueBuffer>(m_events));
@@ -182,6 +187,8 @@ MSWindowsScreen::~MSWindowsScreen()
     // stop the clipboard worker before the event queue buffer goes away
     m_events->remove_handler(EventType::CLIPBOARD_CAPTURED, m_clipboardWorker->event_target());
     m_events->remove_handler(EventType::CLIPBOARD_DATA_REQUESTED,
+                             m_clipboardWorker->event_target());
+    m_events->remove_handler(EventType::CLIPBOARD_FILE_REQUESTED,
                              m_clipboardWorker->event_target());
     m_clipboardWorker.reset();
 
@@ -540,6 +547,26 @@ MonitorLayout MSWindowsScreen::getMonitors() const
     MonitorLayout layout;
     EnumDisplayMonitors(nullptr, nullptr, collect_monitor, reinterpret_cast<LPARAM>(&layout));
     return layout;
+}
+
+void MSWindowsScreen::handle_clipboard_file_needed(const Event& event)
+{
+    // the worker needs a shared file for a paste; the client or server gets it from the
+    // other screens
+    sendEvent(EventType::CLIPBOARD_FILE_REQUESTED,
+              create_event_data<ClipboardFileRequestInfo>(
+                  event.get_data_as<ClipboardFileRequestInfo>()));
+}
+
+bool MSWindowsScreen::getClipboardFile(std::uint64_t hash, std::uint32_t index, fs::path& path,
+                                       std::uint64_t& size) const
+{
+    return m_clipboardWorker->get_file(hash, index, path, size);
+}
+
+void MSWindowsScreen::clipboardFileChunk(const ClipboardFileChunkInfo& chunk)
+{
+    m_clipboardWorker->file_chunk(chunk);
 }
 
 void MSWindowsScreen::handle_clipboard_captured()

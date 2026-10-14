@@ -208,6 +208,15 @@ MonitorLayout Client::getMonitors() const
     return m_screen->getMonitors();
 }
 
+bool Client::serverTakesFiles() const
+{
+    // files are listed without their contents, which are streamed when they are pasted; that
+    // needs the contents to be offered rather than sent, so that the paste is noticed
+    const std::uint32_t needed = kClipboardCapOffers | kClipboardCapFiles |
+                                 kClipboardCapFileStreaming;
+    return m_server != nullptr && (m_server->clipboardCapabilities() & needed) == needed;
+}
+
 bool Client::serverComparesClipboardAges() const
 {
     return m_server != nullptr && (m_server->clipboardCapabilities() & kClipboardCapAge) != 0;
@@ -346,7 +355,7 @@ void Client::clipboardDataRequested(ClipboardID id, const ClipboardOffer& offer)
     // without the files if the server cannot take them
     for (ClipboardID other = 0; other < kClipboardEnd; ++other) {
         MarshalledClipboardPtr data = m_dataClipboard[other];
-        if (data && (m_server->clipboardCapabilities() & kClipboardCapFiles) == 0) {
+        if (data && !serverTakesFiles()) {
             data = without_clipboard_formats(data, 1u << IClipboard::kFiles);
         }
         if (data && data->hash() == offer.hash) {
@@ -543,7 +552,7 @@ void Client::sendClipboardContents(ClipboardID id, const MarshalledClipboardPtr&
 {
     // files are only sent to servers that can put them on their clipboard
     MarshalledClipboardPtr data = contents;
-    if ((m_server->clipboardCapabilities() & kClipboardCapFiles) == 0) {
+    if (!serverTakesFiles()) {
         data = without_clipboard_formats(contents, 1u << IClipboard::kFiles);
     }
 
@@ -563,6 +572,39 @@ void Client::sendClipboardContents(ClipboardID id, const MarshalledClipboardPtr&
         m_pushedClipboard = true;
         m_pushedClipboardHash = data->hash();
     }
+}
+
+void Client::handle_clipboard_file_requested(const Event& event)
+{
+    // an application pastes shared files, so get a file from the server
+    const auto& info = event.get_data_as<ClipboardFileRequestInfo>();
+    if (m_server == nullptr || !m_ready) {
+        ClipboardFileChunkInfo chunk;
+        chunk.hash = info.hash;
+        chunk.index = info.index;
+        chunk.unavailable = true;
+        m_screen->clipboardFileChunk(chunk);
+        return;
+    }
+    m_server->requestClipboardFile(info);
+}
+
+void Client::clipboardFileRequested(ClipboardID id, const ClipboardFileRequestInfo& request)
+{
+    fs::path path;
+    std::uint64_t size = 0;
+    if (!m_screen->getClipboardFile(request.hash, request.index, path, size) ||
+        request.offset > size) {
+        LOG_DEBUG("the server requested shared file %u, which is not available", request.index);
+        m_server->provideClipboardFileUnavailable(id, request.hash, request.index);
+        return;
+    }
+    m_server->provideClipboardFile(id, request, path, size);
+}
+
+void Client::clipboardFileChunk(const ClipboardFileChunkInfo& chunk)
+{
+    m_screen->clipboardFileChunk(chunk);
 }
 
 void Client::send_event(EventType type)
@@ -638,6 +680,8 @@ Client::setupScreen()
                           [this](const auto& e){ handle_clipboard_changed(e); });
     m_events->add_handler(EventType::CLIPBOARD_DATA_REQUESTED, get_event_target(),
                           [this](const auto& e){ handle_clipboard_data_requested(e); });
+    m_events->add_handler(EventType::CLIPBOARD_FILE_REQUESTED, get_event_target(),
+                          [this](const auto& e){ handle_clipboard_file_requested(e); });
 }
 
 void
@@ -686,6 +730,7 @@ Client::cleanupScreen()
         m_events->remove_handler(EventType::CLIPBOARD_GRABBED, get_event_target());
         m_events->remove_handler(EventType::CLIPBOARD_CHANGED, get_event_target());
         m_events->remove_handler(EventType::CLIPBOARD_DATA_REQUESTED, get_event_target());
+        m_events->remove_handler(EventType::CLIPBOARD_FILE_REQUESTED, get_event_target());
         delete m_server;
         m_server = nullptr;
     }

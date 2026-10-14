@@ -23,6 +23,8 @@
 #include "inputleap/Fwd.h"
 #include "inputleap/IClient.h"
 #include "inputleap/ClipboardData.h"
+#include "inputleap/clipboard_types.h"
+#include "io/filesystem.h"
 
 namespace inputleap {
 
@@ -124,6 +126,21 @@ public:
 
     //! Tell the screen that requested clipboard contents are not available
     virtual void provideClipboardUnavailable(ClipboardID id, const ClipboardOffer& offer) { }
+
+    //! Ask the client for the contents of a shared file that it lists
+    virtual void requestClipboardFile(const ClipboardFileRequestInfo& request) { }
+
+    //! Send the client the contents of a shared file that it requested
+    virtual void provideClipboardFile(ClipboardID id, const ClipboardFileRequestInfo& request,
+                                      const fs::path& path, std::uint64_t size) { }
+
+    //! Tell the client that a shared file it requested is not available
+    virtual void provideClipboardFileUnavailable(ClipboardID id, std::uint64_t hash,
+                                                 std::uint32_t index) { }
+
+    //! Whether the client takes files: lists of them, whose contents it requests when they
+    //! are pasted
+    virtual bool supportsClipboardFiles() const { return false; }
 
     //@}
 

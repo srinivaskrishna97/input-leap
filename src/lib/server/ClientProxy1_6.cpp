@@ -73,6 +73,20 @@ ClientProxy1_6::ClientProxy1_6(const std::string& name,
                     }
                 });
 
+    // pieces of shared files from the client are passed on as they arrive
+    m_clipboardReceiver.set_file_sink(
+        [this](const ClipboardTransferHeader& header, std::uint64_t offset,
+               const std::string& chunk) {
+            ClipboardFileChunkInfo info;
+            info.hash = header.hash;
+            info.index = header.file_index;
+            info.offset = offset;
+            info.data = chunk;
+            m_events->add_event(EventType::CLIPBOARD_FILE_CHUNK, get_event_target(),
+                                create_event_data<ClipboardFileChunkInfo>(info));
+            return true;
+        });
+
     setHeartbeatRate(kHeartRate, kHeartRate * kHeartBeatsUntilDeath);
 
     get_conn().send_query_info_1_6();
@@ -275,6 +289,9 @@ bool ClientProxy1_6::parseMessage(const std::uint8_t* code)
     else if (memcmp(code, kMsgDMonitors, 4) == 0) {
         return recvMonitors();
     }
+    else if (memcmp(code, kMsgQClipboardFile, 4) == 0) {
+        return recvClipboardFileRequest();
+    }
     return false;
 }
 
@@ -351,7 +368,7 @@ void ClientProxy1_6::setClipboardData(ClipboardID id, const MarshalledClipboardP
     MarshalledClipboardPtr contents = data ? data : empty_marshalled_clipboard();
 
     // files are only sent to clients that can put them on their clipboard
-    if ((m_clipboardCaps & kClipboardCapFiles) == 0) {
+    if (!supportsClipboardFiles()) {
         contents = without_clipboard_formats(contents, 1u << IClipboard::kFiles);
     }
 
@@ -714,6 +731,69 @@ bool ClientProxy1_6::recvMonitors()
     return true;
 }
 
+bool ClientProxy1_6::supportsClipboardFiles() const
+{
+    // files are listed without their contents, which are streamed when they are pasted; that
+    // needs the contents to be offered rather than sent, so that the paste is noticed
+    const std::uint32_t needed = kClipboardCapOffers | kClipboardCapFiles |
+                                 kClipboardCapFileStreaming;
+    return (m_clipboardCaps & needed) == needed;
+}
+
+bool ClientProxy1_6::recvClipboardFileRequest()
+{
+    if (!supportsClipboardFiles()) {
+        return false;
+    }
+    ClipboardID id;
+    std::uint32_t hashHigh, hashLow, index, offsetHigh, offsetLow;
+    if (!ProtocolUtil::readf(getStream(), kMsgQClipboardFile + 4, &id, &hashHigh, &hashLow,
+                             &index, &offsetHigh, &offsetLow)) {
+        return false;
+    }
+    if (id >= kClipboardEnd) {
+        return false;
+    }
+    ClipboardFileRequestInfo request;
+    request.id = id;
+    request.hash = (static_cast<std::uint64_t>(hashHigh) << 32) | hashLow;
+    request.index = index;
+    request.offset = (static_cast<std::uint64_t>(offsetHigh) << 32) | offsetLow;
+    LOG_DEBUG("client \"%s\" requested shared file %u from offset %llu", getName().c_str(),
+              index, static_cast<unsigned long long>(request.offset));
+    m_events->add_event(EventType::CLIPBOARD_FILE_REQUESTED, get_event_target(),
+                        create_event_data<ClipboardFileRequestInfo>(request));
+    return true;
+}
+
+void ClientProxy1_6::requestClipboardFile(const ClipboardFileRequestInfo& request)
+{
+    if (!supportsClipboardFiles()) {
+        return;
+    }
+    get_conn().send_clipboard_file_request(request);
+}
+
+void ClientProxy1_6::provideClipboardFile(ClipboardID id, const ClipboardFileRequestInfo& request,
+                                          const fs::path& path, std::uint64_t size)
+{
+    std::uint64_t remaining = size - request.offset;
+    auto header = make_clipboard_file_header(request.hash, request.index, request.offset,
+                                             remaining);
+    LOG_DEBUG("sending shared file %u to \"%s\", %llu bytes", request.index,
+              getName().c_str(), static_cast<unsigned long long>(remaining));
+    m_clipboardStreamer->send_file(id, 0, header.format(), path, request.offset, remaining);
+}
+
+void ClientProxy1_6::provideClipboardFileUnavailable(ClipboardID id, std::uint64_t hash,
+                                                     std::uint32_t index)
+{
+    LOG_DEBUG("shared file %u requested by \"%s\" is not available", index, getName().c_str());
+    auto header = make_unavailable_clipboard_file_header(hash, index);
+    m_clipboardStreamer->send_encoded(id, 0, header.format(),
+                                      std::make_shared<const std::string>());
+}
+
 bool ClientProxy1_6::recvClipboardAge()
 {
     if ((m_clipboardCaps & kClipboardCapAge) == 0) {
@@ -761,6 +841,22 @@ bool ClientProxy1_6::recvClipboardData()
     }
 
     auto status = m_clipboardReceiver.add(mark, data);
+
+    if (m_clipboardReceiver.header().kind == ClipboardTransferHeader::Kind::File) {
+        // the pieces were passed on through the sink; tell how the file ended
+        if (status == ClipboardTransferReceiver::Status::InProgress) {
+            return true;
+        }
+        ClipboardFileChunkInfo info;
+        info.hash = m_clipboardReceiver.header().hash;
+        info.index = m_clipboardReceiver.header().file_index;
+        info.offset = m_clipboardReceiver.header().file_offset + m_clipboardReceiver.received();
+        info.complete = status == ClipboardTransferReceiver::Status::Complete;
+        info.unavailable = !info.complete;
+        m_events->add_event(EventType::CLIPBOARD_FILE_CHUNK, get_event_target(),
+                            create_event_data<ClipboardFileChunkInfo>(info));
+        return true;
+    }
 
     ClipboardTransferProgressInfo progress;
     progress.hash = m_clipboardReceiver.header().hash;

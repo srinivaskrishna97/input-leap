@@ -301,6 +301,17 @@ enum class EventType : std::uint32_t {
     */
     CLIPBOARD_AGE,
 
+    /** Sent by a screen that needs the contents of a shared file, e.g. because an application
+        pastes the files, and by a client proxy when the client asks for one. The data is a
+        ClipboardFileRequestInfo.
+    */
+    CLIPBOARD_FILE_REQUESTED,
+
+    /** Sent by a client proxy when a piece of a shared file arrives from the client. The data
+        is a ClipboardFileChunkInfo.
+    */
+    CLIPBOARD_FILE_CHUNK,
+
     /// This event is sent whenever a file chunk is transferred.
     FILE_CHUNK_SENDING,
 

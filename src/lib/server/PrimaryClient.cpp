@@ -185,6 +185,17 @@ void PrimaryClient::setClipboardData(ClipboardID id, const MarshalledClipboardPt
     }
 }
 
+void PrimaryClient::provideClipboardFileUnavailable(ClipboardID, std::uint64_t hash,
+                                                   std::uint32_t index)
+{
+    // the screen asked for the file for a paste
+    ClipboardFileChunkInfo chunk;
+    chunk.hash = hash;
+    chunk.index = index;
+    chunk.unavailable = true;
+    m_screen->clipboardFileChunk(chunk);
+}
+
 bool PrimaryClient::supportsClipboardOffers() const
 {
     return m_screen->supportsClipboardOffers();

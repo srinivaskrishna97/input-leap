@@ -31,6 +31,11 @@ namespace inputleap {
 namespace {
 
 constexpr int kClipboardTransferHeaderVersion = 1;
+constexpr int kClipboardFileTransferHeaderVersion = 2;
+
+// A piece of a file is never larger than this, so a bogus header cannot make the receiver
+// wait for more than that.
+constexpr std::uint64_t kClipboardFilePieceMaxSize = 1ull << 40;
 
 // Compression pays off only for larger contents, and only if it saves a noticeable amount.
 constexpr std::size_t kClipboardMinCompressSize = 16 * 1024;
@@ -68,9 +73,40 @@ std::string ClipboardTransferHeader::format() const
     std::snprintf(hash_text, sizeof(hash_text), "%016" PRIx64, hash);
 
     std::ostringstream out;
+    if (kind == Kind::File) {
+        out << kClipboardFileTransferHeaderVersion << ' ' << static_cast<std::uint32_t>(encoding)
+            << ' ' << encoded_size << ' ' << size << ' ' << hash_text << ' ' << file_index << ' '
+            << file_offset;
+        return out.str();
+    }
     out << kClipboardTransferHeaderVersion << ' ' << static_cast<std::uint32_t>(encoding) << ' '
         << encoded_size << ' ' << size << ' ' << hash_text;
     return out.str();
+}
+
+ClipboardTransferHeader make_clipboard_file_header(std::uint64_t hash, std::uint32_t index,
+                                                   std::uint64_t offset, std::uint64_t size)
+{
+    ClipboardTransferHeader header;
+    header.kind = ClipboardTransferHeader::Kind::File;
+    header.encoding = ClipboardEncoding::None;
+    header.encoded_size = size;
+    header.size = size;
+    header.hash = hash;
+    header.file_index = index;
+    header.file_offset = offset;
+    return header;
+}
+
+ClipboardTransferHeader make_unavailable_clipboard_file_header(std::uint64_t hash,
+                                                               std::uint32_t index)
+{
+    ClipboardTransferHeader header;
+    header.kind = ClipboardTransferHeader::Kind::File;
+    header.encoding = ClipboardEncoding::Unavailable;
+    header.hash = hash;
+    header.file_index = index;
+    return header;
 }
 
 bool ClipboardTransferHeader::parse(const std::string& text, ClipboardTransferHeader& header)
@@ -81,10 +117,23 @@ bool ClipboardTransferHeader::parse(const std::string& text, ClipboardTransferHe
     std::uint64_t encoded_size = 0;
     std::uint64_t size = 0;
     std::string hash_text;
+    std::uint32_t file_index = 0;
+    std::uint64_t file_offset = 0;
     if (!(in >> version >> encoding >> encoded_size >> size >> hash_text)) {
         return false;
     }
-    if (version != kClipboardTransferHeaderVersion) {
+    if (version == kClipboardFileTransferHeaderVersion) {
+        if (!(in >> file_index >> file_offset)) {
+            return false;
+        }
+        // pieces of files are not compressed
+        if (encoding == static_cast<std::uint32_t>(ClipboardEncoding::Rle32) ||
+            (encoding == static_cast<std::uint32_t>(ClipboardEncoding::None) &&
+             (encoded_size != size || size > kClipboardFilePieceMaxSize))) {
+            return false;
+        }
+    }
+    else if (version != kClipboardTransferHeaderVersion) {
         return false;
     }
 
@@ -102,10 +151,15 @@ bool ClipboardTransferHeader::parse(const std::string& text, ClipboardTransferHe
         return false;
     }
 
+    header.kind = version == kClipboardFileTransferHeaderVersion
+                      ? ClipboardTransferHeader::Kind::File
+                      : ClipboardTransferHeader::Kind::Contents;
     header.encoding = static_cast<ClipboardEncoding>(encoding);
     header.encoded_size = encoded_size;
     header.size = size;
     header.hash = hash;
+    header.file_index = file_index;
+    header.file_offset = file_offset;
     return true;
 }
 
@@ -163,11 +217,27 @@ ClipboardTransferReceiver::Status ClipboardTransferReceiver::add(std::uint8_t ma
         buffer_.clear();
         result_.reset();
         started_ = false;
+        file_received_ = 0;
 
         ClipboardTransferHeader header;
         if (!ClipboardTransferHeader::parse(data, header)) {
             LOG_WARN("invalid clipboard transfer header");
             return Status::Failed;
+        }
+
+        if (header.kind == ClipboardTransferHeader::Kind::File) {
+            // the pieces go to the sink as they arrive
+            header_ = header;
+            if (header.encoding == ClipboardEncoding::Unavailable) {
+                started_ = true;
+                return Status::InProgress;
+            }
+            if (!file_sink_) {
+                LOG_WARN("rejected a piece of a shared file, there is nowhere to put it");
+                return Status::Failed;
+            }
+            started_ = true;
+            return Status::InProgress;
         }
 
         std::uint64_t max_encoded_size = header.size;
@@ -195,6 +265,16 @@ ClipboardTransferReceiver::Status ClipboardTransferReceiver::add(std::uint8_t ma
     }
 
     if (mark == kDataChunk) {
+        if (header_.kind == ClipboardTransferHeader::Kind::File) {
+            if (header_.encoding == ClipboardEncoding::Unavailable ||
+                data.size() > header_.encoded_size - file_received_ ||
+                !file_sink_(header_, header_.file_offset + file_received_, data)) {
+                started_ = false;
+                return Status::Failed;
+            }
+            file_received_ += data.size();
+            return Status::InProgress;
+        }
         if (data.size() > header_.encoded_size - buffer_.size()) {
             started_ = false;
             buffer_.clear();
@@ -213,6 +293,9 @@ ClipboardTransferReceiver::Status ClipboardTransferReceiver::add(std::uint8_t ma
     started_ = false;
     if (header_.encoding == ClipboardEncoding::Unavailable) {
         return Status::Unavailable;
+    }
+    if (header_.kind == ClipboardTransferHeader::Kind::File) {
+        return file_received_ == header_.encoded_size ? Status::Complete : Status::Failed;
     }
     if (buffer_.size() != header_.encoded_size) {
         buffer_.clear();

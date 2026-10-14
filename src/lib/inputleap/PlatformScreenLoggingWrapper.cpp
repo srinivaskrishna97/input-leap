@@ -83,6 +83,22 @@ MarshalledClipboardPtr PlatformScreenLoggingWrapper::getClipboardSnapshot(Clipbo
     return result;
 }
 
+bool PlatformScreenLoggingWrapper::getClipboardFile(std::uint64_t hash, std::uint32_t index,
+                                                    fs::path& path, std::uint64_t& size) const
+{
+    bool result = screen_->getClipboardFile(hash, index, path, size);
+    LOG_DEBUG1("PlatformScreen::getClipboardFile() index=%u => %d", index, result);
+    return result;
+}
+
+void PlatformScreenLoggingWrapper::clipboardFileChunk(const ClipboardFileChunkInfo& chunk)
+{
+    LOG_DEBUG2("PlatformScreen::clipboardFileChunk() index=%u offset=%llu size=%zu complete=%d "
+               "unavailable=%d", chunk.index, static_cast<unsigned long long>(chunk.offset),
+               chunk.data.size(), chunk.complete, chunk.unavailable);
+    screen_->clipboardFileChunk(chunk);
+}
+
 MonitorLayout PlatformScreenLoggingWrapper::getMonitors() const
 {
     auto result = screen_->getMonitors();

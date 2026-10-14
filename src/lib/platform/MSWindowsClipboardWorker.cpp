@@ -17,7 +17,9 @@
 #include "platform/MSWindowsClipboardWorker.h"
 
 #include "inputleap/ClipboardHelperMessages.h"
+#include "platform/MSWindowsClipboardFileConverter.h"
 #include "platform/MSWindowsLocalPeer.h"
+#include "common/DataDirectories.h"
 
 #include "platform/MSWindowsClipboard.h"
 #include "inputleap/Clipboard.h"
@@ -26,6 +28,7 @@
 #include "base/Log.h"
 
 #include <chrono>
+#include <cstdio>
 #include <cstring>
 #include <future>
 
@@ -51,6 +54,10 @@ const wchar_t* const kClipboardHelperProgram = L"input-leap-clipboard.exe";
 const UINT kClipboardHelperFallbackMs = 1500;
 const UINT kClipboardHelperWatchMs = 3000;
 const int kClipboardHelperMaxStarts = 10;
+
+// How many lists of files are remembered, so that their files can still be sent after the
+// clipboard changed.
+const std::size_t kClipboardRememberedFileLists = 4;
 
 // Applications often update the clipboard several times in quick succession, so a capture is
 // started only after the clipboard has been quiet for a short while.
@@ -84,6 +91,12 @@ ATOM g_clipboard_worker_class = 0;
 MSWindowsClipboardWorker::MSWindowsClipboardWorker(IEventQueue* events) :
     events_{events}
 {
+    // files of other screens kept here to be passed on are of no use after a restart
+    {
+        std::error_code ec;
+        fs::remove_all(DataDirectories::profile() / "clipboard-kept", ec);
+    }
+
     // shared so that it stays alive until both threads are done with it
     auto started = std::make_shared<std::promise<bool>>();
     auto started_future = started->get_future();
@@ -218,6 +231,10 @@ LRESULT MSWindowsClipboardWorker::handle_message(UINT msg, WPARAM wparam, LPARAM
         }
         if (data != nullptr && data->dwData == kClipboardHelperCaptureMagic) {
             on_helper_capture(data);
+            return TRUE;
+        }
+        if (data != nullptr && data->dwData == kClipboardHelperPathsMagic) {
+            on_helper_paths(data);
             return TRUE;
         }
         // the GUI, which runs as the user, sends the paths of the files on the clipboard
@@ -409,6 +426,8 @@ void MSWindowsClipboardWorker::offer(const ClipboardOffer& offer)
         if (offer_.active && offer_.offer != offer) {
             // a paste waiting for the previous contents won't get them anymore
             offer_.unavailable = true;
+            fetch_.active = false;
+            fetch_.stream.reset();
             offer_cv_.notify_all();
         }
     }
@@ -612,48 +631,381 @@ void MSWindowsClipboardWorker::reset_offer()
     std::lock_guard<std::mutex> lock(mutex_);
     if (offer_.active) {
         offer_ = OfferState{};
+        fetch_.active = false;
+        fetch_.stream.reset();
         offer_cv_.notify_all();
     }
 }
 
-MarshalledClipboardPtr MSWindowsClipboardWorker::wait_for_offer_data()
+void MSWindowsClipboardWorker::set_progress_callback(
+    std::function<void(const ClipboardTransferProgress&)> callback)
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    progress_callback_ = std::move(callback);
+}
+
+void MSWindowsClipboardWorker::remember_file_paths(std::uint64_t hash,
+                                                   std::vector<fs::path> paths)
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    file_paths_[hash] = std::move(paths);
+    file_paths_order_.push_back(hash);
+    while (file_paths_order_.size() > kClipboardRememberedFileLists) {
+        file_paths_.erase(file_paths_order_.front());
+        file_paths_order_.pop_front();
+    }
+}
+
+std::string MSWindowsClipboardWorker::files_of(const MarshalledClipboardPtr& data)
+{
+    if (!data) {
+        return "";
+    }
+    Clipboard clipboard;
+    clipboard.unmarshall(data->data(), 0);
+    std::string listing;
+    if (clipboard.open(0)) {
+        if (clipboard.has(IClipboard::kFiles)) {
+            listing = clipboard.get(IClipboard::kFiles);
+        }
+        clipboard.close();
+    }
+    return listing;
+}
+
+bool MSWindowsClipboardWorker::get_file(std::uint64_t hash, std::uint32_t index, fs::path& path,
+                                        std::uint64_t& size) const
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    auto listed = file_paths_.find(hash);
+    if (listed != file_paths_.end()) {
+        if (index >= listed->second.size() || listed->second[index].empty()) {
+            return false;
+        }
+        std::error_code ec;
+        std::uint64_t file_size = fs::file_size(listed->second[index], ec);
+        if (ec) {
+            return false;
+        }
+        path = listed->second[index];
+        size = file_size;
+        return true;
+    }
+    auto kept = kept_files_.find(std::make_pair(hash, index));
+    if (kept != kept_files_.end() && kept->second.complete) {
+        path = kept->second.path;
+        size = kept->second.received;
+        return true;
+    }
+    return false;
+}
+
+fs::path MSWindowsClipboardWorker::kept_file_path(std::uint64_t hash, std::uint32_t index) const
+{
+    char name[32];
+    std::snprintf(name, sizeof(name), "%016llx", static_cast<unsigned long long>(hash));
+    return DataDirectories::profile() / "clipboard-kept" / name / std::to_string(index);
+}
+
+void MSWindowsClipboardWorker::file_chunk(const ClipboardFileChunkInfo& chunk)
+{
+    std::function<void(const ClipboardTransferProgress&)> callback;
+    ClipboardTransferProgress progress;
+    bool report = false;
+    ClipboardFileRequestInfo next;
+    bool request_next = false;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (!fetch_.active || chunk.hash != fetch_.hash || chunk.index != fetch_.current) {
+            keep_file_chunk(chunk);
+            return;
+        }
+
+        // a file of the contents being pasted
+        const ClipboardFileEntry& entry = fetch_.list.entries()[fetch_.current];
+        if (chunk.unavailable) {
+            LOG_WARN("the file \"%s\" from another screen is not available", entry.path.c_str());
+            finish_file_fetch(false);
+        }
+        else if (!chunk.data.empty() &&
+                 (chunk.offset != fetch_.received || !fetch_.stream ||
+                  !fetch_.stream->write(chunk.data.data(),
+                                        static_cast<std::streamsize>(chunk.data.size())))) {
+            LOG_WARN("cannot write the file \"%s\" from another screen", entry.path.c_str());
+            finish_file_fetch(false);
+        }
+        else {
+            fetch_.received += chunk.data.size();
+            fetch_.total_received += chunk.data.size();
+            if (chunk.complete) {
+                if (fetch_.received != entry.size) {
+                    LOG_WARN("the file \"%s\" from another screen arrived incomplete",
+                             entry.path.c_str());
+                    finish_file_fetch(false);
+                }
+                else {
+                    fetch_.stream.reset();
+                    request_next = request_next_file(next);
+                }
+            }
+        }
+
+        progress.state = fetch_.active ? ClipboardTransferProgress::State::Receiving
+                         : offer_.files_ready ? ClipboardTransferProgress::State::Completed
+                                              : ClipboardTransferProgress::State::Failed;
+        progress.received = fetch_.total_received;
+        progress.total = fetch_.list.total_size();
+        progress.formats = 1u << IClipboard::kFiles;
+        report = true;
+        callback = progress_callback_;
+    }
+    if (request_next) {
+        events_->add_event(EventType::CLIPBOARD_FILE_REQUESTED, &target_,
+                           create_event_data<ClipboardFileRequestInfo>(next));
+    }
+    if (report && callback) {
+        callback(progress);
+    }
+}
+
+void MSWindowsClipboardWorker::keep_file_chunk(const ClipboardFileChunkInfo& chunk)
+{
+    // note -- mutex_ must be locked on entry
+    // A file of another screen that is not being pasted here is kept to be passed on to a
+    // third screen (the server fetches it for a client).  It must arrive from the start;
+    // the rest of a file whose paste was abandoned is dropped.
+    auto key = std::make_pair(chunk.hash, chunk.index);
+    auto kept = kept_files_.find(key);
+    if (chunk.unavailable) {
+        if (kept != kept_files_.end()) {
+            kept_files_.erase(kept);
+        }
+        return;
+    }
+    if (kept != kept_files_.end() && kept->second.complete) {
+        if (chunk.offset != 0) {
+            return;
+        }
+        // the file is being sent again
+        kept_files_.erase(kept);
+        kept = kept_files_.end();
+    }
+    if (kept == kept_files_.end()) {
+        if (chunk.offset != 0) {
+            return;
+        }
+        KeptFile file;
+        file.path = kept_file_path(chunk.hash, chunk.index);
+        std::error_code ec;
+        fs::create_directories(file.path.parent_path(), ec);
+        file.stream = std::make_unique<std::ofstream>();
+        open_utf8_path(*file.stream, file.path, std::ios::out | std::ios::binary | std::ios::trunc);
+        kept = kept_files_.emplace(key, std::move(file)).first;
+    }
+
+    KeptFile& file = kept->second;
+    bool ok = file.stream && *file.stream && chunk.offset == file.received;
+    if (ok && !chunk.data.empty()) {
+        ok = file.stream->write(chunk.data.data(), static_cast<std::streamsize>(chunk.data.size()))
+                 .good();
+        file.received += chunk.data.size();
+    }
+    if (!ok) {
+        LOG_WARN("cannot keep a file from another screen");
+        kept_files_.erase(kept);
+    }
+    else if (chunk.complete) {
+        file.stream.reset();
+        file.complete = true;
+    }
+}
+
+bool MSWindowsClipboardWorker::start_file_fetch(std::uint64_t hash, const std::string& listing,
+                                                ClipboardFileRequestInfo& request)
+{
+    // note -- mutex_ must be locked on entry
+    fetch_ = FileFetch{};
+    if (!fetch_.list.parse(listing)) {
+        LOG_WARN("the files from another screen are listed in a malformed way");
+        offer_.unavailable = true;
+        return false;
+    }
+    if (fetch_.list.has_contents()) {
+        // the contents came along, as from an older version
+        offer_.files_ready = true;
+        return false;
+    }
+
+    fetch_.hash = hash;
+    fetch_.listing = listing;
+    fetch_.directory = MSWindowsClipboardFileConverter::new_received_directory();
+    std::error_code ec;
+    fs::create_directories(fetch_.directory, ec);
+    for (const auto& entry : fetch_.list.entries()) {
+        if (ec) {
+            break;
+        }
+        fs::path target = fetch_.directory / fs::u8path(entry.path);
+        if (entry.is_directory) {
+            fs::create_directories(target, ec);
+        }
+        else {
+            fs::create_directories(target.parent_path(), ec);
+        }
+        fetch_.paths.push_back(entry.is_directory ? fs::path() : target);
+    }
+    if (ec) {
+        LOG_WARN("cannot create \"%s\" for the files from another screen: %s",
+                 fetch_.directory.u8string().c_str(), ec.message().c_str());
+        offer_.unavailable = true;
+        return false;
+    }
+
+    fetch_.active = true;
+    offer_.fetching_files = true;
+    LOG_INFO("fetching %s from another screen, %llu bytes",
+             describe_clipboard_files(fetch_.list).c_str(),
+             static_cast<unsigned long long>(fetch_.list.total_size()));
+    return request_next_file(request);
+}
+
+bool MSWindowsClipboardWorker::request_next_file(ClipboardFileRequestInfo& request)
+{
+    // note -- mutex_ must be locked on entry
+    const auto& entries = fetch_.list.entries();
+    while (fetch_.next < entries.size()) {
+        std::size_t index = fetch_.next++;
+        const ClipboardFileEntry& entry = entries[index];
+        if (entry.is_directory) {
+            continue;
+        }
+        auto stream = std::make_unique<std::ofstream>();
+        open_utf8_path(*stream, fetch_.paths[index],
+                       std::ios::out | std::ios::binary | std::ios::trunc);
+        if (!*stream) {
+            LOG_WARN("cannot create the file \"%s\" from another screen", entry.path.c_str());
+            finish_file_fetch(false);
+            return false;
+        }
+        if (entry.size == 0) {
+            // created empty; nothing to fetch
+            continue;
+        }
+        fetch_.current = index;
+        fetch_.received = 0;
+        fetch_.stream = std::move(stream);
+
+        request.id = kClipboardClipboard;
+        request.hash = fetch_.hash;
+        request.index = static_cast<std::uint32_t>(index);
+        request.offset = 0;
+        return true;
+    }
+    finish_file_fetch(true);
+    return false;
+}
+
+void MSWindowsClipboardWorker::finish_file_fetch(bool ok)
+{
+    // note -- mutex_ must be locked on entry
+    fetch_.stream.reset();
+    fetch_.active = false;
+    offer_.fetching_files = false;
+    if (ok) {
+        MSWindowsClipboardFileConverter::register_received_files(fetch_.listing, fetch_.directory);
+        file_paths_[fetch_.hash] = fetch_.paths;
+        file_paths_order_.push_back(fetch_.hash);
+        while (file_paths_order_.size() > kClipboardRememberedFileLists) {
+            file_paths_.erase(file_paths_order_.front());
+            file_paths_order_.pop_front();
+        }
+        offer_.files_ready = true;
+        LOG_INFO("received %s from another screen", describe_clipboard_files(fetch_.list).c_str());
+    }
+    else {
+        std::error_code ec;
+        fs::remove_all(fetch_.directory, ec);
+        offer_.unavailable = true;
+    }
+    offer_cv_.notify_all();
+}
+
+MarshalledClipboardPtr MSWindowsClipboardWorker::wait_for_offer_data(bool want_files)
 {
     std::unique_lock<std::mutex> lock(mutex_);
     if (!offer_.active || offer_.unavailable) {
         return nullptr;
     }
-    if (offer_.data) {
+
+    const ClipboardOffer offer = offer_.offer;
+    if (!offer_.data) {
+        if (!offer_.requested) {
+            offer_.requested = true;
+            lock.unlock();
+            LOG_DEBUG("requesting offered clipboard data, size=%u", offer.size);
+            events_->add_event(EventType::CLIPBOARD_DATA_REQUESTED, &target_,
+                               create_event_data<ClipboardOffer>(offer));
+            lock.lock();
+        }
+
+        auto timeout = std::chrono::seconds(
+            kClipboardRenderTimeoutSeconds +
+            static_cast<long long>(offer.size / kClipboardRenderBytesPerSecond));
+        bool done = offer_cv_.wait_for(lock, timeout,
+                                       [this, &offer]() {
+            return !offer_.active || offer_.offer != offer || offer_.data || offer_.unavailable;
+        });
+
+        if (!(offer_.active && offer_.offer == offer && offer_.data)) {
+            if (offer_.active && offer_.offer == offer) {
+                // allow a later paste to request the data again
+                offer_.requested = false;
+                offer_.unavailable = false;
+            }
+            if (!done) {
+                LOG_WARN("timed out waiting for clipboard data from another screen");
+            }
+            return nullptr;
+        }
+    }
+    if (!want_files || offer_.files_ready) {
         return offer_.data;
     }
 
-    const ClipboardOffer offer = offer_.offer;
-    if (!offer_.requested) {
-        offer_.requested = true;
-        lock.unlock();
-        LOG_DEBUG("requesting offered clipboard data, size=%u", offer.size);
-        events_->add_event(EventType::CLIPBOARD_DATA_REQUESTED, &target_,
-                           create_event_data<ClipboardOffer>(offer));
-        lock.lock();
-    }
-
-    auto timeout = std::chrono::seconds(
-        kClipboardRenderTimeoutSeconds +
-        static_cast<long long>(offer.size / kClipboardRenderBytesPerSecond));
-    bool done = offer_cv_.wait_for(lock, timeout,
-                                   [this, &offer]() {
-        return !offer_.active || offer_.offer != offer || offer_.data || offer_.unavailable;
-    });
-
-    if (offer_.active && offer_.offer == offer) {
-        if (offer_.data) {
+    // the files that the contents list are fetched before the paste completes
+    if (!offer_.fetching_files) {
+        std::string listing = files_of(offer_.data);
+        if (listing.empty()) {
+            offer_.files_ready = true;
             return offer_.data;
         }
-        // allow a later paste to request the data again
-        offer_.requested = false;
-        offer_.unavailable = false;
+        ClipboardFileRequestInfo request;
+        if (start_file_fetch(offer.hash, listing, request)) {
+            lock.unlock();
+            events_->add_event(EventType::CLIPBOARD_FILE_REQUESTED, &target_,
+                               create_event_data<ClipboardFileRequestInfo>(request));
+            lock.lock();
+        }
+    }
+    auto timeout = std::chrono::seconds(
+        kClipboardRenderTimeoutSeconds +
+        static_cast<long long>(fetch_.list.total_size() / kClipboardRenderBytesPerSecond));
+    bool done = offer_cv_.wait_for(lock, timeout, [this, &offer]() {
+        return !offer_.active || offer_.offer != offer || offer_.files_ready ||
+               offer_.unavailable;
+    });
+    if (offer_.active && offer_.offer == offer && offer_.files_ready) {
+        return offer_.data;
     }
     if (!done) {
-        LOG_WARN("timed out waiting for clipboard data from another screen");
+        LOG_WARN("timed out waiting for the files from another screen");
+    }
+    if (offer_.active && offer_.offer == offer) {
+        // allow a later paste to try again
+        fetch_.active = false;
+        fetch_.stream.reset();
+        offer_.fetching_files = false;
+        offer_.unavailable = false;
     }
     return nullptr;
 }
@@ -670,7 +1022,8 @@ void MSWindowsClipboardWorker::render_format(UINT win32_format)
         return;
     }
 
-    MarshalledClipboardPtr data = wait_for_offer_data();
+    // the files that the contents list are fetched only when the list itself is pasted
+    MarshalledClipboardPtr data = wait_for_offer_data(format == IClipboard::kFiles);
     if (!data) {
         LOG_WARN("clipboard data from another screen is not available");
         return;
@@ -826,6 +1179,23 @@ void MSWindowsClipboardWorker::on_helper_hello(const COPYDATASTRUCT* data)
     LOG_DEBUG("the clipboard helper is ready");
 }
 
+void MSWindowsClipboardWorker::on_helper_paths(const COPYDATASTRUCT* data)
+{
+    std::uint32_t sequence = 0;
+    std::vector<std::string> utf8;
+    if (!decode_clipboard_file_paths(data->lpData, data->cbData, sequence, utf8)) {
+        LOG_WARN("ignoring malformed file paths from the clipboard helper");
+        return;
+    }
+    std::vector<fs::path> paths;
+    for (const std::string& path : utf8) {
+        paths.push_back(fs::u8path(path));
+    }
+    // only the capture that follows can use them
+    helper_paths_.clear();
+    helper_paths_[sequence] = std::move(paths);
+}
+
 void MSWindowsClipboardWorker::on_helper_capture(const COPYDATASTRUCT* data)
 {
     std::uint32_t sequence = 0;
@@ -847,6 +1217,12 @@ void MSWindowsClipboardWorker::on_helper_capture(const COPYDATASTRUCT* data)
     // prepare the compressed form now, so that sending it later does not have to
     if (contents->size() >= kClipboardEagerSize) {
         contents->rle32();
+    }
+    // where the files that the contents list are, which the helper sent ahead of the capture
+    auto paths = helper_paths_.find(sequence);
+    if (paths != helper_paths_.end()) {
+        remember_file_paths(contents->hash(), std::move(paths->second));
+        helper_paths_.erase(paths);
     }
     bool has_files =
         (marshalled_clipboard_formats(contents->data()) & (1u << IClipboard::kFiles)) != 0;
@@ -951,13 +1327,15 @@ void MSWindowsClipboardWorker::capture_locally()
         }
     }
     bool has_files = false;
+    std::vector<fs::path> listed_paths;
     if (clipboard.open(0)) {
         if (!user_files.empty() && !clipboard.has(IClipboard::kFiles)) {
             std::string files;
-            if (read_clipboard_files(user_files, kClipboardFilesMaxBytes, files)) {
+            std::vector<fs::path> file_paths;
+            if (read_clipboard_file_listing(user_files, files, file_paths)) {
                 clipboard.add(IClipboard::kFiles, files);
-                LOG_INFO("files on clipboard: %zu items, %zu bytes (paths from the GUI)",
-                         user_files.size(), files.size());
+                listed_paths = std::move(file_paths);
+                LOG_INFO("files on clipboard: %zu items (paths from the GUI)", user_files.size());
             }
         }
         has_files = clipboard.has(IClipboard::kFiles);
@@ -965,6 +1343,17 @@ void MSWindowsClipboardWorker::capture_locally()
     }
 
     auto data = marshall_clipboard(clipboard);
+
+    // where the files that the contents list are, so that they can be sent when pasted
+    if (has_files) {
+        std::string listing = files_of(data);
+        if (listed_paths.empty() && !listing.empty()) {
+            MSWindowsClipboardFileConverter::take_listed_paths(listing, listed_paths);
+        }
+        if (!listed_paths.empty()) {
+            remember_file_paths(data->hash(), std::move(listed_paths));
+        }
+    }
 
     if (data->size() <= 4 && user_files.empty() &&
         empty_capture_waits_ < kClipboardMaxEmptyCaptureWaits) {

@@ -164,6 +164,15 @@ void ClientConnectionByStream::send_clipboard_data_request(ClipboardID id, std::
                          static_cast<std::uint32_t>(hash >> 32), static_cast<std::uint32_t>(hash));
 }
 
+void ClientConnectionByStream::send_clipboard_file_request(const ClipboardFileRequestInfo& request)
+{
+    ProtocolUtil::writef(stream_.get(), kMsgQClipboardFile, request.id,
+                         static_cast<std::uint32_t>(request.hash >> 32),
+                         static_cast<std::uint32_t>(request.hash), request.index,
+                         static_cast<std::uint32_t>(request.offset >> 32),
+                         static_cast<std::uint32_t>(request.offset));
+}
+
 void ClientConnectionByStream::flush()
 {
     stream_->flush();

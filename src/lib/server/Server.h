@@ -304,6 +304,8 @@ private:
     void handle_clipboard_data_unavailable(const Event& event, BaseClientProxy* client);
     void handle_clipboard_transfer_progress(const Event& event);
     void handle_clipboard_age(const Event& event, BaseClientProxy* client);
+    void handle_clipboard_file_requested(const Event& event, BaseClientProxy* client);
+    void handle_clipboard_file_chunk(const Event& event, BaseClientProxy* client);
     void handle_key_down_event(const Event& event);
     void handle_key_up_event(const Event& event);
     void handle_key_repeat_event(const Event& event);
@@ -331,6 +333,8 @@ private:
     void onClipboardChanged(BaseClientProxy* sender, ClipboardID id, std::uint32_t seqNum);
     void onClipboardOffered(BaseClientProxy* sender, const ClipboardOfferInfo& info);
     void onClipboardAge(BaseClientProxy* sender, ClipboardID id, std::uint32_t age_ms);
+    void onClipboardFileRequested(BaseClientProxy* requester,
+                                  const ClipboardFileRequestInfo& request);
     void onClipboardDataRequested(BaseClientProxy* requester, ClipboardID id,
                                   const ClipboardOffer& offer);
 
@@ -399,6 +403,14 @@ public:
     bool m_mock;
 
 private:
+    // a shared file of a client being fetched to this computer, and the clients waiting to
+    // get it from here
+    struct ClipboardFileForward {
+        ClipboardID m_id = 0;
+        bool m_requested = false;
+        std::vector<BaseClientProxy*> m_waiting;
+    };
+
     class ClipboardInfo {
     public:
         ClipboardInfo();
@@ -456,6 +468,7 @@ private:
 
     // clipboard cache
     ClipboardInfo m_clipboards[kClipboardEnd];
+    std::map<std::pair<std::uint64_t, std::uint32_t>, ClipboardFileForward> m_fileForwards;
 
     // state saved when screen saver activates
     BaseClientProxy* m_activeSaver;

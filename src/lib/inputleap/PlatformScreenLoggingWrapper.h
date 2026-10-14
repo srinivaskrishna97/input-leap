@@ -38,6 +38,9 @@ public:
     MarshalledClipboardPtr getClipboardSnapshot(ClipboardID id) const override;
     std::uint32_t getClipboardSnapshotAge(ClipboardID id) const override;
     MonitorLayout getMonitors() const override;
+    bool getClipboardFile(std::uint64_t hash, std::uint32_t index, fs::path& path,
+                          std::uint64_t& size) const override;
+    void clipboardFileChunk(const ClipboardFileChunkInfo& chunk) override;
     bool supportsClipboardOffers() const override;
     void setClipboardOffer(ClipboardID id, const ClipboardOffer& offer) override;
     void clipboardDataUnavailable(ClipboardID id, const ClipboardOffer& offer) override;

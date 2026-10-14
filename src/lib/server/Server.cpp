@@ -1327,6 +1327,110 @@ void Server::handle_clipboard_age(const Event& event, BaseClientProxy* client)
     onClipboardAge(client, info.id, info.age_ms);
 }
 
+void Server::handle_clipboard_file_requested(const Event& event, BaseClientProxy* client)
+{
+    // ignore events from unknown clients
+    if (m_clientSet.count(client) == 0) {
+        return;
+    }
+    const auto& request = event.get_data_as<ClipboardFileRequestInfo>();
+    if (request.id >= kClipboardEnd) {
+        return;
+    }
+    if (!m_enableClipboard || (m_maximumClipboardSize == 0)) {
+        client->provideClipboardFileUnavailable(request.id, request.hash, request.index);
+        return;
+    }
+    onClipboardFileRequested(client, request);
+}
+
+void Server::onClipboardFileRequested(BaseClientProxy* requester,
+                                      const ClipboardFileRequestInfo& request)
+{
+    // the owner of the contents that list the files
+    BaseClientProxy* owner = nullptr;
+    for (ClipboardID id = 0; id < kClipboardEnd; ++id) {
+        if (m_clipboards[id].m_clipboardOffer.hash == request.hash) {
+            auto index = m_clients.find(m_clipboards[id].m_clipboardOwner);
+            if (index != m_clients.end()) {
+                owner = index->second;
+            }
+            break;
+        }
+    }
+
+    // the file is served from this computer when it is here: shared from here, or already
+    // fetched from the owner
+    fs::path path;
+    std::uint64_t size = 0;
+    if (m_screen->getClipboardFile(request.hash, request.index, path, size) &&
+        request.offset <= size) {
+        requester->provideClipboardFile(request.id, request, path, size);
+        return;
+    }
+    if (owner == nullptr || owner == m_primaryClient || owner == requester) {
+        LOG_DEBUG("shared file %u requested by \"%s\" is not available", request.index,
+                  getName(requester).c_str());
+        requester->provideClipboardFileUnavailable(request.id, request.hash, request.index);
+        return;
+    }
+
+    // another client has the file: fetch it to this computer first, then serve it from here
+    auto& forward = m_fileForwards[std::make_pair(request.hash, request.index)];
+    forward.m_id = request.id;
+    if (requester != m_primaryClient &&
+        std::find(forward.m_waiting.begin(), forward.m_waiting.end(), requester) ==
+            forward.m_waiting.end()) {
+        forward.m_waiting.push_back(requester);
+    }
+    if (!forward.m_requested) {
+        forward.m_requested = true;
+        ClipboardFileRequestInfo whole = request;
+        whole.offset = 0;
+        LOG_DEBUG("fetching shared file %u from \"%s\"", request.index, getName(owner).c_str());
+        owner->requestClipboardFile(whole);
+    }
+}
+
+void Server::handle_clipboard_file_chunk(const Event& event, BaseClientProxy* client)
+{
+    // ignore events from unknown clients
+    if (m_clientSet.count(client) == 0) {
+        return;
+    }
+    const auto& chunk = event.get_data_as<ClipboardFileChunkInfo>();
+
+    // this computer keeps the file, for its own paste and for other clients
+    m_screen->clipboardFileChunk(chunk);
+
+    if (!chunk.complete && !chunk.unavailable) {
+        return;
+    }
+    auto found = m_fileForwards.find(std::make_pair(chunk.hash, chunk.index));
+    if (found == m_fileForwards.end()) {
+        return;
+    }
+    ClipboardFileForward forward = found->second;
+    m_fileForwards.erase(found);
+    for (BaseClientProxy* waiter : forward.m_waiting) {
+        if (m_clientSet.count(waiter) == 0) {
+            continue;
+        }
+        fs::path path;
+        std::uint64_t size = 0;
+        if (!chunk.unavailable && m_screen->getClipboardFile(chunk.hash, chunk.index, path, size)) {
+            ClipboardFileRequestInfo whole;
+            whole.id = forward.m_id;
+            whole.hash = chunk.hash;
+            whole.index = chunk.index;
+            waiter->provideClipboardFile(forward.m_id, whole, path, size);
+        }
+        else {
+            waiter->provideClipboardFileUnavailable(forward.m_id, chunk.hash, chunk.index);
+        }
+    }
+}
+
 void Server::handle_key_down_event(const Event& event)
 {
     const auto& info = event.get_data_as<IPlatformScreen::KeyInfo>();
@@ -2415,6 +2519,12 @@ Server::addClient(BaseClientProxy* client)
                           });
     m_events->add_handler(EventType::CLIPBOARD_AGE, client->get_event_target(),
                           [this, client](const auto& e){ handle_clipboard_age(e, client); });
+    m_events->add_handler(EventType::CLIPBOARD_FILE_REQUESTED, client->get_event_target(),
+                          [this, client](const auto& e){
+                              handle_clipboard_file_requested(e, client);
+                          });
+    m_events->add_handler(EventType::CLIPBOARD_FILE_CHUNK, client->get_event_target(),
+                          [this, client](const auto& e){ handle_clipboard_file_chunk(e, client); });
     m_events->add_handler(EventType::CLIPBOARD_TRANSFER_PROGRESS, client->get_event_target(),
                           [this](const auto& e){ handle_clipboard_transfer_progress(e); });
 
@@ -2451,6 +2561,14 @@ Server::removeClient(BaseClientProxy* client)
     m_events->remove_handler(EventType::CLIPBOARD_DATA_UNAVAILABLE, client->get_event_target());
     m_events->remove_handler(EventType::CLIPBOARD_TRANSFER_PROGRESS, client->get_event_target());
     m_events->remove_handler(EventType::CLIPBOARD_AGE, client->get_event_target());
+    m_events->remove_handler(EventType::CLIPBOARD_FILE_REQUESTED, client->get_event_target());
+    m_events->remove_handler(EventType::CLIPBOARD_FILE_CHUNK, client->get_event_target());
+
+    // the client won't get shared files it waited for
+    for (auto& forward : m_fileForwards) {
+        auto& waiting = forward.second.m_waiting;
+        waiting.erase(std::remove(waiting.begin(), waiting.end(), client), waiting.end());
+    }
 
 	// remove from list
 	m_clients.erase(getName(client));

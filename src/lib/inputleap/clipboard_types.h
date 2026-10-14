@@ -19,6 +19,7 @@
 #pragma once
 
 #include <cstdint>
+#include <string>
 
 //! Clipboard ID
 /*!
@@ -64,10 +65,16 @@ static const std::uint32_t kClipboardCapFiles       = 1u << 2;
 // and the server keeps the younger of the two clipboards instead of replacing the client's.
 static const std::uint32_t kClipboardCapAge         = 1u << 3;
 
+// Files are shared as a list without their contents, and the contents of each file are
+// requested with kMsgQClipboardFile and streamed when they are pasted. Without this, files
+// are not shared at all.
+static const std::uint32_t kClipboardCapFileStreaming = 1u << 4;
+
 static const std::uint32_t kClipboardCapsSupported  = kClipboardCapOffers |
                                                       kClipboardCapCompression |
                                                       kClipboardCapFiles |
-                                                      kClipboardCapAge;
+                                                      kClipboardCapAge |
+                                                      kClipboardCapFileStreaming;
 
 // kMsgDClipboardAge age of contents whose age is not known
 static const std::uint32_t kClipboardAgeUnknown     = 0xffffffffu;
@@ -76,6 +83,24 @@ static const std::uint32_t kClipboardAgeUnknown     = 0xffffffffu;
 struct ClipboardAgeInfo {
     ClipboardID id = 0;
     std::uint32_t age_ms = kClipboardAgeUnknown;
+};
+
+//! A request for the contents of one file of shared files, see kMsgQClipboardFile
+struct ClipboardFileRequestInfo {
+    ClipboardID id = 0;
+    std::uint64_t hash = 0;     //!< of the clipboard contents that list the file
+    std::uint32_t index = 0;    //!< of the file in the list
+    std::uint64_t offset = 0;   //!< the contents are wanted from here on
+};
+
+//! A piece of the contents of a shared file arriving from another screen
+struct ClipboardFileChunkInfo {
+    std::uint64_t hash = 0;
+    std::uint32_t index = 0;
+    std::uint64_t offset = 0;   //!< of the piece within the file
+    std::string data;
+    bool complete = false;      //!< the file's contents are all there after this piece
+    bool unavailable = false;   //!< the other screen cannot provide the file
 };
 
 //! The state of clipboard contents arriving from another screen, for showing their progress

@@ -63,6 +63,7 @@ public:
     void send_clipboard_offer(ClipboardID id, std::uint32_t flags,
                               const ClipboardOffer& offer) override;
     void send_clipboard_data_request(ClipboardID id, std::uint64_t hash) override;
+    void send_clipboard_file_request(const ClipboardFileRequestInfo& request) override;
 
     void flush() override;
     void close() override;

@@ -20,10 +20,13 @@
 #include "inputleap/ClipboardChunk.h"
 #include "inputleap/ClipboardData.h"
 #include "inputleap/clipboard_types.h"
+#include "io/filesystem.h"
 
 #include <cstdint>
 #include <deque>
+#include <fstream>
 #include <functional>
+#include <memory>
 #include <string>
 
 namespace inputleap {
@@ -82,6 +85,12 @@ public:
     void send_encoded(ClipboardID id, std::uint32_t sequence, std::string start_payload,
                       std::shared_ptr<const std::string> payload);
 
+    /*! Queues \p size bytes of a file, from \p offset on, read from the file while they are
+        sent. \p start_payload is put into the start chunk. If the file cannot be read, the
+        transfer ends short and the receiver rejects it. */
+    void send_file(ClipboardID id, std::uint32_t sequence, std::string start_payload,
+                   const fs::path& file, std::uint64_t offset, std::uint64_t size);
+
     /// Drops all pending transfers. A partially sent transfer is left incomplete.
     void cancel();
 
@@ -103,13 +112,22 @@ private:
         ClipboardID id = 0;
         std::uint32_t sequence = 0;
         std::string start_payload;
-        // Exactly one of these holds the data.
+        // Exactly one of these holds the data: marshalled or encoded contents in memory, or a
+        // file on disk that is read while it is sent.
         MarshalledClipboardPtr marshalled;
         std::shared_ptr<const std::string> encoded;
-        std::size_t offset = 0;
+        fs::path file;
+        std::uint64_t file_offset = 0;
+        std::shared_ptr<std::ifstream> file_stream;
+        std::uint64_t size = 0;
+        std::uint64_t offset = 0;
         bool started = false;
+        bool failed = false;
 
+        bool from_file() const { return !file.empty(); }
         const std::string& bytes() const;
+        // reads the next chunk of at most \p max bytes into \p out; false if the file failed
+        bool read_chunk(std::size_t max, std::string& out);
     };
 
     void enqueue(Transfer transfer);

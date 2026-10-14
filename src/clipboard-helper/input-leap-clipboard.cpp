@@ -30,7 +30,9 @@
 #include "inputleap/ClipboardData.h"
 #include "inputleap/ClipboardHelperMessages.h"
 #include "platform/MSWindowsClipboard.h"
+#include "platform/MSWindowsClipboardFileConverter.h"
 #include "platform/MSWindowsDebugOutputter.h"
+#include "io/filesystem.h"
 #include "arch/Arch.h"
 #include "arch/win32/ArchMiscWindows.h"
 #include "base/Log.h"
@@ -42,6 +44,7 @@
 #include <cstdlib>
 #include <string>
 #include <thread>
+#include <vector>
 
 // the logging macros refer to inputleap::Log unqualified
 using namespace inputleap;
@@ -115,6 +118,26 @@ void capture_and_send()
     MarshalledClipboardPtr data = marshall_clipboard(clipboard);
     LOG_DEBUG("captured clipboard sequence %lu, size=%zu", static_cast<unsigned long>(sequence),
               data->size());
+
+    // where the files that the contents list are on this computer, so that the core can send
+    // them when they are pasted on another screen
+    std::string listing;
+    if (clipboard.open(0)) {
+        if (clipboard.has(IClipboard::kFiles)) {
+            listing = clipboard.get(IClipboard::kFiles);
+        }
+        clipboard.close();
+    }
+    std::vector<fs::path> paths;
+    if (!listing.empty() && MSWindowsClipboardFileConverter::take_listed_paths(listing, paths)) {
+        std::vector<std::string> utf8;
+        for (const auto& path : paths) {
+            utf8.push_back(path.u8string());
+        }
+        if (!send_to_core(kClipboardHelperPathsMagic, encode_clipboard_file_paths(sequence, utf8))) {
+            LOG_WARN("the core did not take the paths of the files on the clipboard");
+        }
+    }
     if (!send_to_core(kClipboardHelperCaptureMagic,
                       encode_clipboard_capture(sequence, data->data()))) {
         LOG_WARN("the core did not take the clipboard contents");

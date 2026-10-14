@@ -21,6 +21,7 @@
 #include "inputleap/clipboard_types.h"
 #include "inputleap/ClipboardData.h"
 #include "inputleap/ClipboardTransfer.h"
+#include "io/filesystem.h"
 #include "inputleap/key_types.h"
 #include "inputleap/Fwd.h"
 #include "base/Fwd.h"
@@ -80,6 +81,16 @@ public:
 
     //! Tell the server the monitors of the screen, if the server asked for them
     void sendMonitors();
+
+    //! Ask the server for the contents of a shared file
+    void requestClipboardFile(const ClipboardFileRequestInfo& request);
+
+    //! Send the contents of a shared file that the server requested
+    void provideClipboardFile(ClipboardID, const ClipboardFileRequestInfo& request,
+                              const fs::path& path, std::uint64_t size);
+
+    //! Tell the server that a shared file it requested is not available
+    void provideClipboardFileUnavailable(ClipboardID, std::uint64_t hash, std::uint32_t index);
 
     //! Ask the server for offered clipboard contents
     void requestClipboardData(ClipboardID, const ClipboardOffer& offer);
@@ -155,6 +166,7 @@ private:
     void clipboardOffer();
     void clipboardDataRequest();
     void clipboardData();
+    void clipboardFileRequest();
 
     void sendClipboardTransfer(ClipboardID, const ClipboardTransferPayload& payload);
 

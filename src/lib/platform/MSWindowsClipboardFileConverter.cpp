@@ -16,6 +16,7 @@
 
 #include "platform/MSWindowsClipboardFileConverter.h"
 
+#include "inputleap/ClipboardData.h"
 #include "inputleap/ClipboardFiles.h"
 #include "common/DataDirectories.h"
 #include "base/Log.h"
@@ -27,6 +28,9 @@
 #include <chrono>
 #include <cstdio>
 #include <cstring>
+#include <deque>
+#include <map>
+#include <mutex>
 
 namespace inputleap {
 
@@ -40,8 +44,23 @@ fs::path received_files_root()
     return DataDirectories::profile() / "clipboard";
 }
 
+// What toIClipboard() listed and where fromIClipboard() finds received files, both by the
+// hash of the list.  A few are kept, as a list may be needed after the clipboard changed.
+const std::size_t kRememberedFileLists = 4;
+
+std::mutex g_file_lists_mutex;
+std::map<std::uint64_t, std::vector<fs::path>> g_listed_paths;
+std::deque<std::uint64_t> g_listed_order;
+std::map<std::uint64_t, fs::path> g_received_directories;
+std::deque<std::uint64_t> g_received_order;
+
+std::uint64_t listing_hash(const std::string& listing)
+{
+    return MarshalledClipboard::compute_hash(listing.data(), listing.size());
+}
+
 // Returns a new directory for received files, removing the oldest sets.
-fs::path new_received_directory()
+fs::path make_received_directory()
 {
     fs::path root = received_files_root();
     std::error_code ec;
@@ -79,9 +98,70 @@ UINT MSWindowsClipboardFileConverter::getWin32Format() const
     return CF_HDROP;
 }
 
+fs::path MSWindowsClipboardFileConverter::new_received_directory()
+{
+    return make_received_directory();
+}
+
+bool MSWindowsClipboardFileConverter::take_listed_paths(const std::string& listing,
+                                                        std::vector<fs::path>& paths)
+{
+    std::lock_guard<std::mutex> lock(g_file_lists_mutex);
+    auto found = g_listed_paths.find(listing_hash(listing));
+    if (found == g_listed_paths.end()) {
+        return false;
+    }
+    paths = found->second;
+    return true;
+}
+
+void MSWindowsClipboardFileConverter::register_received_files(const std::string& listing,
+                                                              const fs::path& directory)
+{
+    std::lock_guard<std::mutex> lock(g_file_lists_mutex);
+    std::uint64_t hash = listing_hash(listing);
+    g_received_directories[hash] = directory;
+    g_received_order.push_back(hash);
+    while (g_received_order.size() > kRememberedFileLists) {
+        g_received_directories.erase(g_received_order.front());
+        g_received_order.pop_front();
+    }
+}
+
 HANDLE MSWindowsClipboardFileConverter::fromIClipboard(const std::string& data) const
 {
-    std::vector<fs::path> paths = write_clipboard_files(data, new_received_directory());
+    ClipboardFileList list;
+    if (!list.parse(data)) {
+        LOG_WARN("the files on the clipboard are malformed");
+        return nullptr;
+    }
+
+    std::vector<fs::path> paths;
+    if (list.has_contents()) {
+        // the contents came along, as from an older version
+        paths = write_clipboard_files(data, make_received_directory());
+    }
+    else {
+        // the clipboard worker fetched the files before this, see MSWindowsClipboardWorker
+        fs::path directory;
+        {
+            std::lock_guard<std::mutex> lock(g_file_lists_mutex);
+            auto found = g_received_directories.find(listing_hash(data));
+            if (found != g_received_directories.end()) {
+                directory = found->second;
+            }
+        }
+        if (directory.empty()) {
+            LOG_WARN("the files from another screen have not arrived");
+            return nullptr;
+        }
+        for (const auto& entry : list.entries()) {
+            // the top-level entries; the rest is below them
+            if (entry.path.find('/') == std::string::npos) {
+                paths.push_back(directory / fs::u8path(entry.path));
+            }
+        }
+    }
     if (paths.empty()) {
         return nullptr;
     }
@@ -135,11 +215,26 @@ std::string MSWindowsClipboardFileConverter::toIClipboard(HANDLE data) const
         return {};
     }
 
+    // the files are listed with their sizes; the contents are sent when they are pasted
     std::string out;
-    if (!read_clipboard_files(paths, kClipboardFilesMaxBytes, out)) {
+    std::vector<fs::path> file_paths;
+    if (!read_clipboard_file_listing(paths, out, file_paths)) {
         return {};
     }
-    LOG_INFO("files on clipboard: %zu items, %zu bytes", paths.size(), out.size());
+    {
+        std::lock_guard<std::mutex> lock(g_file_lists_mutex);
+        std::uint64_t hash = listing_hash(out);
+        g_listed_paths[hash] = std::move(file_paths);
+        g_listed_order.push_back(hash);
+        while (g_listed_order.size() > kRememberedFileLists) {
+            g_listed_paths.erase(g_listed_order.front());
+            g_listed_order.pop_front();
+        }
+    }
+    ClipboardFileList list;
+    list.parse(out);
+    LOG_INFO("files on clipboard: %s, %llu bytes", describe_clipboard_files(list).c_str(),
+             static_cast<unsigned long long>(list.total_size()));
     return out;
 }
 

@@ -22,6 +22,7 @@
 #include "inputleap/ClipboardData.h"
 #include "inputleap/clipboard_types.h"
 #include "inputleap/MonitorLayout.h"
+#include "io/filesystem.h"
 #include "inputleap/IScreen.h"
 #include "inputleap/IPrimaryScreen.h"
 #include "inputleap/ISecondaryScreen.h"
@@ -100,6 +101,23 @@ public:
     not tell them apart.
     */
     virtual MonitorLayout getMonitors() const = 0;
+
+    //! Get a shared file that contents captured on this screen list
+    /*!
+    Contents captured on this screen may list files without their contents (see
+    ClipboardFileList). Returns the path and size of the file with the given index in the
+    contents with the given hash, so that it can be sent to a screen that pastes it, or false
+    if the contents or the file are not known.
+    */
+    virtual bool getClipboardFile(std::uint64_t hash, std::uint32_t index, fs::path& path,
+                                  std::uint64_t& size) const = 0;
+
+    //! Receive a piece of a shared file
+    /*!
+    A piece of a file that this screen asked for with a \c CLIPBOARD_FILE_REQUESTED event, or
+    that is kept here to be passed on to another screen. See ClipboardFileChunkInfo.
+    */
+    virtual void clipboardFileChunk(const ClipboardFileChunkInfo& chunk) = 0;
 
     //! Test if the screen prepares clipboard snapshots
     /*!

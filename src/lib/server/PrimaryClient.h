@@ -140,6 +140,9 @@ public:
     void setClipboardOffer(ClipboardID id, const ClipboardOffer& offer) override;
     void provideClipboardData(ClipboardID id, const MarshalledClipboardPtr& data) override;
     void provideClipboardUnavailable(ClipboardID id, const ClipboardOffer& offer) override;
+    void provideClipboardFileUnavailable(ClipboardID id, std::uint64_t hash,
+                                         std::uint32_t index) override;
+    bool supportsClipboardFiles() const override { return true; }
 
     //! Show the progress of a clipboard transfer
     /*!

@@ -356,6 +356,19 @@ public:
     */
     virtual MonitorLayout getMonitors() const;
 
+    //! Get a shared file that this screen's contents list
+    /*!
+    See IPlatformScreen::getClipboardFile().
+    */
+    bool getClipboardFile(std::uint64_t hash, std::uint32_t index, fs::path& path,
+                          std::uint64_t& size) const;
+
+    //! Receive a piece of a shared file
+    /*!
+    See IPlatformScreen::clipboardFileChunk().
+    */
+    void clipboardFileChunk(const ClipboardFileChunkInfo& chunk);
+
     IPlatformScreen* getPlatformScreen() { return m_screen.get(); }
 
 protected:

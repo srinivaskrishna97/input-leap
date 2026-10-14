@@ -48,6 +48,28 @@ TEST(ClipboardHelperMessagesTests, capture_may_be_empty_but_not_truncated)
     EXPECT_FALSE(decode_clipboard_capture(nullptr, 4, sequence, decoded));
 }
 
+TEST(ClipboardHelperMessagesTests, file_paths_round_trip)
+{
+    std::vector<std::string> paths = {"C:\\Users\\me\\photo.jpg", "",
+                                      "D:\\docs\\r\xc3\xa9sum\xc3\xa9.pdf"};
+    std::string encoded = encode_clipboard_file_paths(31, paths);
+    std::uint32_t sequence = 0;
+    std::vector<std::string> decoded;
+    ASSERT_TRUE(decode_clipboard_file_paths(encoded.data(), encoded.size(), sequence, decoded));
+    EXPECT_EQ(sequence, 31u);
+    EXPECT_EQ(decoded, paths);
+
+    // no paths at all is valid; a truncated list is not
+    encoded = encode_clipboard_file_paths(5, {});
+    ASSERT_TRUE(decode_clipboard_file_paths(encoded.data(), encoded.size(), sequence, decoded));
+    EXPECT_EQ(sequence, 5u);
+    EXPECT_TRUE(decoded.empty());
+    encoded = encode_clipboard_file_paths(5, {"abc"});
+    EXPECT_FALSE(decode_clipboard_file_paths(encoded.data(), encoded.size() - 1, sequence, decoded));
+    EXPECT_FALSE(decode_clipboard_file_paths(encoded.data(), 6, sequence, decoded));
+    EXPECT_FALSE(decode_clipboard_file_paths(encoded.data(), 3, sequence, decoded));
+}
+
 TEST(ClipboardHelperMessagesTests, hello_round_trip)
 {
     std::string encoded = encode_clipboard_helper_hello(0x0000123456789abcull, 4242);

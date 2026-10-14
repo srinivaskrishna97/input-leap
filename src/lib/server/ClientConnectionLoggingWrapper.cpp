@@ -230,6 +230,14 @@ void ClientConnectionLoggingWrapper::send_clipboard_data_request(ClipboardID id,
     conn_->send_clipboard_data_request(id, hash);
 }
 
+void ClientConnectionLoggingWrapper::send_clipboard_file_request(
+    const ClipboardFileRequestInfo& request)
+{
+    LOG_DEBUG1("send request for shared file %u from offset %llu to \"%s\"", request.index,
+               static_cast<unsigned long long>(request.offset), name_.c_str());
+    conn_->send_clipboard_file_request(request);
+}
+
 void ClientConnectionLoggingWrapper::flush()
 {
     conn_->flush();

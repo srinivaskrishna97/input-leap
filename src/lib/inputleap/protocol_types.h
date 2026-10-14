@@ -293,6 +293,15 @@ extern const char*        kMsgDClipboardAge;
 // the rectangle around them.  $1 = the encoded layout.
 extern const char*        kMsgDMonitors;
 
+// clipboard file request:  primary <-> secondary
+// asks the owner of shared files for the contents of one of them, which it sends as a
+// kMsgDClipboardData transfer whose header names the file (see ClipboardTransferHeader).
+// only used once kClipboardCapFileStreaming has been negotiated.  $1 = clipboard identifier,
+// $2 and $3 = high and low 32 bits of the hash of the contents that list the files, $4 = the
+// index of the file in the list, $5 and $6 = high and low 32 bits of the offset from which
+// the contents are wanted.
+extern const char*        kMsgQClipboardFile;
+
 // client data:  secondary -> primary
 // $1 = coordinate of leftmost pixel on secondary screen,
 // $2 = coordinate of topmost pixel on secondary screen,
