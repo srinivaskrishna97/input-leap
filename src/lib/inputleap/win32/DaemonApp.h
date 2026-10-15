@@ -57,6 +57,8 @@ private:
     IpcLogOutputter* m_ipcLogOutputter;
     IEventQueue* m_events;
     FileLogOutputter* m_fileLogOutputter;
+    // why logFilename() did not use the stored log file, logged once the log file is open
+    std::string m_logFilenameWarning;
 };
 
 #define LOG_FILENAME "input-leapd.log"

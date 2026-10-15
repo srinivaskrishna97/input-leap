@@ -70,8 +70,9 @@ absolutley be replaced!
 void
 MSWindowsUtil::createDirectory(const std::string& path, bool stripLast)
 {
-    // create parent directories
-    for (auto pos = path.find_first_of('\\'); pos != std::string::npos; pos = path.find_first_of('\\', pos + 1))
+    // create parent directories; paths may use either separator
+    for (auto pos = path.find_first_of("\\/"); pos != std::string::npos;
+         pos = path.find_first_of("\\/", pos + 1))
         CreateDirectory(path.substr(0, pos).c_str(), nullptr);
     if (!stripLast)
         // create innermost directory

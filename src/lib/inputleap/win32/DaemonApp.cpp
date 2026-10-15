@@ -43,10 +43,14 @@
 #include "platform/MSWindowsWatchdog.h"
 #include "platform/MSWindowsEventQueueBuffer.h"
 #include "platform/MSWindowsUtil.h"
+#include "io/filesystem.h"
 
 #define WIN32_LEAN_AND_MEAN
 #include <Windows.h>
 
+#include <algorithm>
+#include <cctype>
+#include <stdexcept>
 #include <string>
 #include <iostream>
 #include <sstream>
@@ -178,6 +182,9 @@ DaemonApp::mainLoop(bool daemonized)
         if (daemonized) {
             m_fileLogOutputter = new FileLogOutputter(logFilename().c_str());
             CLOG->insert(m_fileLogOutputter);
+            if (!m_logFilenameWarning.empty()) {
+                LOG_WARN("%s", m_logFilenameWarning.c_str());
+            }
         }
 
         // create socket multiplexer.  this must happen after daemonization
@@ -282,13 +289,67 @@ std::string DaemonApp::core_log_filename(const std::string& requested)
     return filename;
 }
 
+namespace {
+
+// whether the file is directly in the folder, comparing the paths as written without regard to
+// case or the kind of separators
+bool is_in_folder(const std::string& file, const std::string& folder)
+{
+    auto normalized = [](std::string path) {
+        std::replace(path.begin(), path.end(), '/', '\\');
+        while (path.size() > 3 && path.back() == '\\') {
+            path.pop_back();
+        }
+        std::transform(path.begin(), path.end(), path.begin(),
+                       [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        return path;
+    };
+    std::string parent = normalized(file);
+    auto separator = parent.find_last_of('\\');
+    if (separator == std::string::npos) {
+        return false;
+    }
+    parent.erase(separator);
+    return parent == normalized(folder);
+}
+
+} // namespace
+
 std::string
 DaemonApp::logFilename()
 {
+    const fs::path& folder = inputleap::DataDirectories::global();
     std::string logFilename = ARCH->setting("LogFilename");
-    if (logFilename.empty())
-        logFilename = (inputleap::DataDirectories::global() / LOG_FILENAME).u8string();
-    MSWindowsUtil::createDirectory(logFilename, true);
+    if (logFilename.empty()) {
+        logFilename = (folder / LOG_FILENAME).u8string();
+    }
+
+    // a path from an older version, e.g. in Barrier's program folder, may point to a folder
+    // that does not exist; the log then goes to the log folder, so that there is one
+    std::string reason;
+    if (!is_in_folder(logFilename, folder.u8string())) {
+        reason = "it is not in the log folder " + folder.u8string();
+    }
+    else {
+        MSWindowsUtil::createDirectory(logFilename, true);
+        std::error_code ec;
+        if (!fs::is_directory(fs::u8path(logFilename).parent_path(), ec)) {
+            reason = "its folder cannot be created";
+        }
+    }
+    const std::string fallback = (folder / "input-leap.log").u8string();
+    if (!reason.empty() && logFilename != fallback) {
+        m_logFilenameWarning = "not logging to " + logFilename + " because " + reason +
+                               "; logging to " + fallback + " instead";
+        logFilename = fallback;
+        MSWindowsUtil::createDirectory(logFilename, true);
+        try {
+            ARCH->setting("LogFilename", logFilename);
+        }
+        catch (std::runtime_error& e) {
+            m_logFilenameWarning += std::string(" (cannot save it: ") + e.what() + ")";
+        }
+    }
     return logFilename;
 }
 
