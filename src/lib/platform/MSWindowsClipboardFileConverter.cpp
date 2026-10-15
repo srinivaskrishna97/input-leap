@@ -167,14 +167,14 @@ HANDLE MSWindowsClipboardFileConverter::fromIClipboard(const std::string& data) 
     }
 
     // a DROPFILES structure followed by the paths as a double null terminated list
-    std::wstring list;
+    std::wstring names;
     for (const auto& path : paths) {
-        list += path.wstring();
-        list.push_back(L'\0');
+        names += path.wstring();
+        names.push_back(L'\0');
     }
-    list.push_back(L'\0');
+    names.push_back(L'\0');
 
-    std::size_t bytes = sizeof(DROPFILES) + list.size() * sizeof(wchar_t);
+    std::size_t bytes = sizeof(DROPFILES) + names.size() * sizeof(wchar_t);
     HGLOBAL global = GlobalAlloc(GMEM_MOVEABLE | GMEM_DDESHARE, bytes);
     if (global == nullptr) {
         return nullptr;
@@ -188,8 +188,8 @@ HANDLE MSWindowsClipboardFileConverter::fromIClipboard(const std::string& data) 
     std::memset(drop, 0, sizeof(DROPFILES));
     drop->pFiles = sizeof(DROPFILES);
     drop->fWide = TRUE;
-    std::memcpy(static_cast<char*>(memory) + sizeof(DROPFILES), list.data(),
-                list.size() * sizeof(wchar_t));
+    std::memcpy(static_cast<char*>(memory) + sizeof(DROPFILES), names.data(),
+                names.size() * sizeof(wchar_t));
     GlobalUnlock(global);
 
     LOG_INFO("put %zu files from another screen on the clipboard", paths.size());
