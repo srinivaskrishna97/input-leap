@@ -59,6 +59,33 @@ const int kClipboardHelperMaxStarts = 10;
 // clipboard changed.
 const std::size_t kClipboardRememberedFileLists = 4;
 
+// The process that has the clipboard open, i.e. the one that asks for a format to be rendered,
+// for the log.
+std::string clipboard_requester()
+{
+    HWND window = GetOpenClipboardWindow();
+    if (window == nullptr) {
+        return "an unknown process";
+    }
+    DWORD pid = 0;
+    GetWindowThreadProcessId(window, &pid);
+    std::string name = "pid " + std::to_string(pid);
+    HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+    if (process != nullptr) {
+        wchar_t path[MAX_PATH] = {};
+        DWORD length = MAX_PATH;
+        if (QueryFullProcessImageNameW(process, 0, path, &length)) {
+            name = fs::path(path).filename().u8string() + " (" + name + ")";
+        }
+        CloseHandle(process);
+    }
+    wchar_t window_class[64] = {};
+    if (GetClassNameW(window, window_class, 64) > 0) {
+        name += ", window class " + fs::path(window_class).u8string();
+    }
+    return name;
+}
+
 // Applications often update the clipboard several times in quick succession, so a capture is
 // started only after the clipboard has been quiet for a short while.
 const UINT kClipboardCaptureDelayMs = 100;
@@ -1019,6 +1046,7 @@ MarshalledClipboardPtr MSWindowsClipboardWorker::wait_for_offer_data(bool want_f
 
 void MSWindowsClipboardWorker::render_format(UINT win32_format)
 {
+    LOG_DEBUG("rendering clipboard format %u for %s", win32_format, clipboard_requester().c_str());
     MSWindowsClipboard clipboard(window_);
     if (win32_format == MSWindowsClipboard::preferredDropEffectFormat()) {
         clipboard.addPreferredDropEffect();
@@ -1050,6 +1078,7 @@ void MSWindowsClipboardWorker::render_format(UINT win32_format)
 
 void MSWindowsClipboardWorker::render_all_formats()
 {
+    LOG_DEBUG("rendering all clipboard formats for %s", clipboard_requester().c_str());
     MarshalledClipboardPtr data;
     std::uint32_t formats = 0;
     {
