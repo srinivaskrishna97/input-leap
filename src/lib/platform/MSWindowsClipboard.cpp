@@ -27,6 +27,8 @@
 #include "arch/win32/ArchMiscWindows.h"
 #include "base/Log.h"
 
+#include <atomic>
+
 namespace inputleap {
 
 UINT                    MSWindowsClipboard::s_ownershipFormat = 0;
@@ -88,8 +90,11 @@ MSWindowsClipboard::clear()
 
     // mark clipboard as being owned by InputLeap
     HGLOBAL data = GlobalAlloc(GMEM_MOVEABLE | GMEM_DDESHARE, 1);
-    if (nullptr == SetClipboardData(getOwnershipFormat(), data)) {
-        LOG_DEBUG("failed to set clipboard data");
+    UINT format = getOwnershipFormat();
+    if (nullptr == SetClipboardData(format, data)) {
+        DWORD error = GetLastError();
+        LOG_DEBUG("failed to mark the clipboard as InputLeap's, format %u (error %lu)", format,
+                  static_cast<unsigned long>(error));
         GlobalFree(data);
         return false;
     }
@@ -264,11 +269,8 @@ MSWindowsClipboard::clearConverters()
 
 bool MSWindowsClipboard::is_owned_by_us()
 {
-    // create ownership format if we haven't yet
-    if (s_ownershipFormat == 0) {
-        s_ownershipFormat = RegisterClipboardFormat(TEXT("InputLeapOwnership"));
-    }
-    return (IsClipboardFormatAvailable(getOwnershipFormat()) != 0);
+    UINT format = getOwnershipFormat();
+    return format != 0 && IsClipboardFormatAvailable(format) != 0;
 }
 
 UINT
@@ -276,7 +278,18 @@ MSWindowsClipboard::getOwnershipFormat()
 {
     // create ownership format if we haven't yet
     if (s_ownershipFormat == 0) {
-        s_ownershipFormat = RegisterClipboardFormat(TEXT("InputLeapOwnership"));
+        UINT format = RegisterClipboardFormat(TEXT("InputLeapOwnership"));
+        if (format == 0) {
+            DWORD error = GetLastError();
+            static std::atomic<bool> warned{false};
+            if (!warned.exchange(true)) {
+                LOG_WARN("cannot register the InputLeapOwnership clipboard format (error %lu)",
+                         static_cast<unsigned long>(error));
+            }
+            return 0;
+        }
+        LOG_DEBUG("the InputLeapOwnership clipboard format is %u", format);
+        s_ownershipFormat = format;
     }
 
     // return the format

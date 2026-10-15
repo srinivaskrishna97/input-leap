@@ -56,6 +56,13 @@ public:
     //! Test if clipboard is owned by InputLeap
     static bool is_owned_by_us();
 
+    //! The clipboard format that marks contents as InputLeap's
+    /*!
+    Registered on first use; returns 0, and tries again on the next call, if the format cannot
+    be registered.
+    */
+    static UINT getOwnershipFormat();
+
     // IClipboard overrides
     virtual bool clear();
     virtual void add(EFormat, const std::string& data);
@@ -105,8 +112,6 @@ private:
     UINT convertFormatToWin32(EFormat) const;
     HANDLE convertTextToWin32(const std::string& data) const;
     std::string convertTextFromWin32(HANDLE) const;
-
-    static UINT getOwnershipFormat();
 
 private:
     typedef std::vector<IMSWindowsClipboardConverter*> ConverterList;

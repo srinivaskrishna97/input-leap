@@ -237,6 +237,10 @@ LRESULT MSWindowsClipboardWorker::handle_message(UINT msg, WPARAM wparam, LPARAM
             on_helper_paths(data);
             return TRUE;
         }
+        if (data != nullptr && data->dwData == kClipboardHelperOwnedMagic) {
+            on_helper_owned(data);
+            return TRUE;
+        }
         // the GUI, which runs as the user, sends the paths of the files on the clipboard
         return on_copy_data(data) ? TRUE : FALSE;
     }
@@ -365,14 +369,17 @@ void MSWindowsClipboardWorker::poll()
     DWORD sequence = GetClipboardSequenceNumber();
     {
         std::lock_guard<std::mutex> lock(mutex_);
-        if (capture_pending_ || (snapshot_ && snapshot_sequence_ == sequence)) {
+        if (capture_pending_ || (snapshot_ && snapshot_sequence_ == sequence) ||
+            (helper_owned_ && helper_owned_sequence_ == sequence)) {
             return;
         }
     }
     if (MSWindowsClipboard::is_owned_by_us()) {
         return;
     }
-    LOG_DEBUG("clipboard changed without notification");
+    UINT ownership = MSWindowsClipboard::getOwnershipFormat();
+    LOG_DEBUG("clipboard changed without notification (ownership format %u, available=%d)",
+              ownership, ownership != 0 && IsClipboardFormatAvailable(ownership) != 0);
     post_capture();
 }
 
@@ -1196,6 +1203,30 @@ void MSWindowsClipboardWorker::on_helper_paths(const COPYDATASTRUCT* data)
     helper_paths_[sequence] = std::move(paths);
 }
 
+void MSWindowsClipboardWorker::on_helper_owned(const COPYDATASTRUCT* data)
+{
+    std::uint32_t sequence = 0;
+    if (!decode_clipboard_sequence(data->lpData, data->cbData, sequence)) {
+        LOG_WARN("ignoring a malformed answer from the clipboard helper");
+        return;
+    }
+    KillTimer(window_, kClipboardWorkerHelperFallbackTimer);
+    helper_capture_expected_ = false;
+
+    if (sequence != GetClipboardSequenceNumber()) {
+        // the clipboard changed again since the helper looked at it
+        LOG_DEBUG("ignoring an outdated answer from the clipboard helper");
+        schedule_capture(kClipboardCaptureDelayMs);
+        return;
+    }
+
+    LOG_DEBUG("the clipboard helper reports the clipboard as ours");
+    std::lock_guard<std::mutex> lock(mutex_);
+    helper_owned_ = true;
+    helper_owned_sequence_ = sequence;
+    capture_pending_ = false;
+}
+
 void MSWindowsClipboardWorker::on_helper_capture(const COPYDATASTRUCT* data)
 {
     std::uint32_t sequence = 0;
@@ -1265,7 +1296,9 @@ void MSWindowsClipboardWorker::capture_now()
         }
         {
             std::lock_guard<std::mutex> lock(mutex_);
-            if (snapshot_ && snapshot_sequence_ == GetClipboardSequenceNumber()) {
+            DWORD sequence = GetClipboardSequenceNumber();
+            if ((snapshot_ && snapshot_sequence_ == sequence) ||
+                (helper_owned_ && helper_owned_sequence_ == sequence)) {
                 capture_pending_ = false;
                 return;
             }
@@ -1384,7 +1417,10 @@ void MSWindowsClipboardWorker::capture_locally()
         } else {
             formats = "(clipboard busy)";
         }
-        LOG_DEBUG("clipboard has no known formats; win32 formats: %s", formats.c_str());
+        UINT ownership = MSWindowsClipboard::getOwnershipFormat();
+        LOG_DEBUG("clipboard has no known formats; win32 formats: %s; ownership format %u, "
+                  "available=%d", formats.c_str(), ownership,
+                  ownership != 0 && IsClipboardFormatAvailable(ownership) != 0);
     }
 
     if (GetClipboardSequenceNumber() != sequence) {

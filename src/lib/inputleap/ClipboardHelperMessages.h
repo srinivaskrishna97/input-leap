@@ -39,6 +39,9 @@ constexpr std::uint32_t kClipboardHelperHelloMagic = 0x494C4348;   // "ILCH"
 constexpr std::uint32_t kClipboardHelperRequestMagic = 0x494C4352; // "ILCR"
 /// helper -> core: the captured contents. Payload: see encode_clipboard_capture().
 constexpr std::uint32_t kClipboardHelperCaptureMagic = 0x494C4343; // "ILCC"
+/// helper -> core, in answer to a request: the clipboard holds InputLeap's own contents, so there
+/// is nothing to capture. Payload: the clipboard sequence number, see encode_clipboard_sequence().
+constexpr std::uint32_t kClipboardHelperOwnedMagic = 0x494C434F;   // "ILCO"
 /// helper -> core, before a capture that lists files: where the files are on this computer.
 /// Payload: see encode_clipboard_file_paths().
 constexpr std::uint32_t kClipboardHelperPathsMagic = 0x494C4350;   // "ILCP"
@@ -55,6 +58,10 @@ std::string encode_clipboard_file_paths(std::uint32_t sequence,
                                         const std::vector<std::string>& paths);
 bool decode_clipboard_file_paths(const void* bytes, std::size_t size, std::uint32_t& sequence,
                                  std::vector<std::string>& paths);
+
+/// A clipboard sequence number: 4 bytes, little endian.
+std::string encode_clipboard_sequence(std::uint32_t sequence);
+bool decode_clipboard_sequence(const void* bytes, std::size_t size, std::uint32_t& sequence);
 
 /// The helper's window handle (8 bytes) and process id (4 bytes), little endian.
 std::string encode_clipboard_helper_hello(std::uint64_t window, std::uint32_t pid);

@@ -202,6 +202,7 @@ private:
     void on_helper_hello(const COPYDATASTRUCT* data);
     void on_helper_capture(const COPYDATASTRUCT* data);
     void on_helper_paths(const COPYDATASTRUCT* data);
+    void on_helper_owned(const COPYDATASTRUCT* data);
     void capture_locally();
     void remember_file_paths(std::uint64_t hash, std::vector<fs::path> paths);
     static std::string files_of(const MarshalledClipboardPtr& data);
@@ -244,6 +245,10 @@ private:
     std::chrono::steady_clock::time_point notified_time_;
     // whether the snapshot holds a file list
     bool snapshot_has_files_ = false;
+    // the clipboard sequence number that the helper reported as holding InputLeap's own
+    // contents, which need no capture
+    bool helper_owned_ = false;
+    DWORD helper_owned_sequence_ = 0;
     bool capture_pending_ = false;
     OfferState offer_;
 

@@ -63,6 +63,8 @@ const int kMaxRetries = 40;
 HWND g_window = nullptr;
 HWND g_core = nullptr;
 int g_retries = 0;
+// whether the core asked for a capture that has not been answered yet
+bool g_requested = false;
 
 bool send_to_core(ULONG_PTR magic, const std::string& payload)
 {
@@ -90,6 +92,15 @@ void capture_and_send()
 {
     // contents put on the clipboard by InputLeap came from another screen
     if (MSWindowsClipboard::is_owned_by_us()) {
+        if (g_requested) {
+            // the core may not recognize them as InputLeap's; tell it, so that it does not
+            // capture them by itself
+            g_requested = false;
+            if (!send_to_core(kClipboardHelperOwnedMagic,
+                              encode_clipboard_sequence(GetClipboardSequenceNumber()))) {
+                LOG_WARN("the core did not take the answer about the clipboard");
+            }
+        }
         return;
     }
 
@@ -104,6 +115,7 @@ void capture_and_send()
         else {
             LOG_WARN("cannot read the clipboard");
             g_retries = 0;
+            g_requested = false;
         }
         return;
     }
@@ -138,6 +150,7 @@ void capture_and_send()
             LOG_WARN("the core did not take the paths of the files on the clipboard");
         }
     }
+    g_requested = false;
     if (!send_to_core(kClipboardHelperCaptureMagic,
                       encode_clipboard_capture(sequence, data->data()))) {
         LOG_WARN("the core did not take the clipboard contents");
@@ -164,6 +177,7 @@ LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
         const auto* data = reinterpret_cast<const COPYDATASTRUCT*>(lparam);
         if (data != nullptr && data->dwData == inputleap::kClipboardHelperRequestMagic) {
             g_retries = 0;
+            g_requested = true;
             schedule_capture(USER_TIMER_MINIMUM);
             return TRUE;
         }

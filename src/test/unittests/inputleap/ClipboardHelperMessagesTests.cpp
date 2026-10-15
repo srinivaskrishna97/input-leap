@@ -70,6 +70,22 @@ TEST(ClipboardHelperMessagesTests, file_paths_round_trip)
     EXPECT_FALSE(decode_clipboard_file_paths(encoded.data(), 3, sequence, decoded));
 }
 
+TEST(ClipboardHelperMessagesTests, sequence_round_trip)
+{
+    std::string encoded = encode_clipboard_sequence(0x0a0b0c0du);
+    ASSERT_EQ(encoded.size(), 4u);
+    EXPECT_EQ(static_cast<unsigned char>(encoded[0]), 0x0d);
+    std::uint32_t sequence = 0;
+    ASSERT_TRUE(decode_clipboard_sequence(encoded.data(), encoded.size(), sequence));
+    EXPECT_EQ(sequence, 0x0a0b0c0du);
+
+    // exactly four bytes
+    EXPECT_FALSE(decode_clipboard_sequence(encoded.data(), 3, sequence));
+    std::string longer = encoded + "x";
+    EXPECT_FALSE(decode_clipboard_sequence(longer.data(), longer.size(), sequence));
+    EXPECT_FALSE(decode_clipboard_sequence(nullptr, 4, sequence));
+}
+
 TEST(ClipboardHelperMessagesTests, hello_round_trip)
 {
     std::string encoded = encode_clipboard_helper_hello(0x0000123456789abcull, 4242);

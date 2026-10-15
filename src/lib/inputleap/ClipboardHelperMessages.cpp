@@ -99,6 +99,22 @@ bool decode_clipboard_file_paths(const void* bytes, std::size_t size, std::uint3
     return true;
 }
 
+std::string encode_clipboard_sequence(std::uint32_t sequence)
+{
+    std::string out;
+    put_le(out, sequence, 4);
+    return out;
+}
+
+bool decode_clipboard_sequence(const void* bytes, std::size_t size, std::uint32_t& sequence)
+{
+    if (bytes == nullptr || size != 4) {
+        return false;
+    }
+    sequence = static_cast<std::uint32_t>(get_le(static_cast<const unsigned char*>(bytes), 4));
+    return true;
+}
+
 std::string encode_clipboard_helper_hello(std::uint64_t window, std::uint32_t pid)
 {
     std::string out;
