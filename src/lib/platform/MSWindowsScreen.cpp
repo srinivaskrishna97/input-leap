@@ -29,6 +29,8 @@
 #include "platform/MSWindowsKeyState.h"
 #include "platform/MSWindowsScreenSaver.h"
 #include "inputleap/Clipboard.h"
+#include "inputleap/ClipboardData.h"
+#include "inputleap/ClipboardFiles.h"
 #include "inputleap/KeyMap.h"
 #include "inputleap/XScreen.h"
 #include "inputleap/App.h"
@@ -443,12 +445,40 @@ MSWindowsScreen::setClipboard(ClipboardID, const IClipboard* src)
     }
 }
 
+// Whether the contents list files without their contents (see ClipboardFileList). Such a list
+// cannot be put on the clipboard as it is: the files are fetched when the list is pasted.
+static bool lists_files_without_contents(const MarshalledClipboardPtr& data)
+{
+    if (!data || (marshalled_clipboard_formats(data->data()) & (1u << IClipboard::kFiles)) == 0) {
+        return false;
+    }
+    Clipboard contents;
+    contents.unmarshall(data->data(), 0);
+    bool listing = false;
+    if (contents.open(0)) {
+        ClipboardFileList list;
+        listing = contents.has(IClipboard::kFiles) && list.parse(contents.get(IClipboard::kFiles)) &&
+                  !list.has_contents();
+        contents.close();
+    }
+    return listing;
+}
+
 bool MSWindowsScreen::setClipboardData(ClipboardID id, const MarshalledClipboardPtr& data)
 {
     if (m_clipboardWorker->is_running()) {
         // either the data of offered contents, which completes a paste, or new contents
         if (!m_clipboardWorker->deliver(data)) {
-            m_clipboardWorker->apply(data);
+            if (lists_files_without_contents(data)) {
+                // the files are fetched when the list is pasted, which needs the list to be
+                // offered rather than applied, as it is for a client
+                LOG_DEBUG("offering the file list from another screen instead of applying it");
+                m_clipboardWorker->offer(ClipboardOffer::describe(*data));
+                m_clipboardWorker->deliver(data);
+            }
+            else {
+                m_clipboardWorker->apply(data);
+            }
         }
         return true;
     }
